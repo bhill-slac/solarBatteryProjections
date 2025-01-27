@@ -145,7 +145,7 @@ class   HourlyProj:
             return
         availCharge = self.NewSolar * options.Efficiency / 100
         newCharge = min( availCharge, options.MaxBattery - self.Battery )
-        self.Battery = min( newCharge, options.MaxBattery )
+        self.Battery = min( self.Battery + newCharge, options.MaxBattery )
         self.Charging += newCharge
         self.NewSolar = max( 0, self.NewSolar - newCharge / (options.Efficiency/100) )
  
@@ -156,7 +156,7 @@ class   HourlyProj:
             return
         availCharge = self.OldSolar * options.Efficiency / 100
         newCharge = min( availCharge, options.MaxBattery - self.Battery )
-        self.Battery = min( newCharge, options.MaxBattery )
+        self.Battery = min( self.Battery + newCharge, options.MaxBattery )
         self.Charging += newCharge
         self.OldSolar = max( 0, self.OldSolar - newCharge / (options.Efficiency/100) )
 
@@ -236,7 +236,7 @@ class   HomeSolar:
             if oldSolar < 0.02: oldSolar = 0 # Clean up output by eliminating trivial solar kWh due to CT accuracy limits
             newSolar = oldSolar * (option.NewSolarProd / oldSolarYearlyProd)
             verbose = False # DebugPeakVsOffPeakTimes(data.TimeOfDay)
-            verbose = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 1, 1 )
+            verbose = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 8, 1 )
 
             newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, battery=battery, oldSolar=oldSolar, newSolar=newSolar )
             #if verbose: print( newHour )
@@ -262,8 +262,8 @@ class   HomeSolar:
                 estPeakUsage = data.Usage * 5.5
                 newHour.ApplyNewSolarToGrid( )
                 if option.NEM == '1.0':
-                    # Only use battery if we can cover peak usage too
-                    if newHour.Battery > data.Usage + estPeakUsage:
+                    # Only use battery for 3-4pm partial peak if we can cover peak usage too
+                    if data.TimeOfDay.hour == 3 and newHour.Battery > data.Usage + estPeakUsage:
                         newHour.ApplyBatteryToGrid( )
                     newHour.ApplyOldSolarToGrid( )
                 else:
@@ -465,7 +465,7 @@ def main(argv=None):
     #myHomeSolar.AddOption( Option( 'E-TOU-C', '1.0', 0, 0 ) )
     myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 0 ) )
     #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 5600 ) )
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 11214 ) )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 11214 ) )
     #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 13.5, 5600 ) )
     return 0
 
