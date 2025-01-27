@@ -156,7 +156,7 @@ class   HomeSolar:
             usage = data.Usage
             oldSolar = data.SolarProd
             newSolar = oldSolar * (option.NewSolar / oldSolarYearlyProd)
-            verbose = DebugPeakVsOffPeakTimes(data.TimeOfDay)
+            verbose = False # DebugPeakVsOffPeakTimes(data.TimeOfDay)
 
             if isPeakTime( data.TimeOfDay, option.RatePlan ):
                 # Handle Peak periods
@@ -228,10 +228,10 @@ def readPgeData( pgeDataFile, verbose=False ):
             message = v
         print(repr(sys.exception()))
         sys.stderr.write('I/O Error %s: Could not open "%s": %s\n' % (pgeDataFile, str(message)))
-        return pgeData
+        raise
     except:
         print(repr(sys.exception()))
-        return pgeData
+        raise
 
     csv_reader = csv.DictReader(in_file)
 
@@ -271,11 +271,11 @@ def readVueData( vueDataFile, verbose=False ):
             code = 0
             message = v
         print(repr(sys.exception()))
-        sys.stderr.write('I/O Error %s: Could not open "%s": %s\n' % (vueDataFile, str(message)))
-        return vueData
+        sys.stderr.write('I/O Error %s: Could not open "%s"\n' % (vueDataFile, str(message)))
+        raise
     except:
         print(repr(sys.exception()))
-        return vueData
+        raise
 
     csv_reader = csv.DictReader(in_file)
     numRows = 0
