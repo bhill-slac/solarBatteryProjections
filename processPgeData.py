@@ -107,25 +107,29 @@ def isWinterOffPeakTime( timeOfDay, ratePlan ):
     return False
 
 class   HourlyProj:
-    def __init__( self ):
-        self.Grid      = 0      # kWh
-        self.Battery   = 0      # kWh
-        self.Charging  = 0      # kWh
-        self.NewSolar  = 0      # kWh
-        self.OldSolar  = 0      # kWh
-        self.Export    = 0      # kWh
-        self.TimeOfDay = datetime.now()
-    def __init__( self, time, grid=0, battery=0, charging=0, newSolar=0, oldSolar=0, export=0 ):
+    def __init__( self, time=None, grid=0, battery=0, charging=0, newSolar=0, oldSolar=0, export=0 ):
         self.Grid      = grid      # kWh
         self.Battery   = battery   # kWh
         self.Charging  = charging  # kWh
         self.NewSolar  = newSolar  # kWh
         self.OldSolar  = oldSolar  # kWh
         self.Export    = export    # kWh
-        self.TimeOfDay = time
+        self.TimeOfDay = datetime.datetime.now() if time == None else time
+
     def __str__( self ):
         #return f"{self.TimeOfDay}: Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}" 
         return f"{self.TimeOfDay}: Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}, NewSolar={self.NewSolar:>6.2f}, OldSolar={self.OldSolar:>6.2f}" 
+
+    def __add__( self, other ):
+        # Note: Battery does not get added
+        result = self
+        result.Grid     += other.Grid
+        result.Charging += other.Charging
+        result.NewSolar += other.NewSolar
+        result.OldSolar += other.OldSolar
+        result.Export   += other.Export
+        result.TimeOfDay = max( result.TimeOfDay, other.TimeOfDay )
+        return result
 
     def ApplyBatteryToGrid( self ):
         if self.Grid > 0 and self.Battery > 0:
@@ -231,6 +235,7 @@ class   HomeSolar:
         print( f'Adding option: {option}' )
         battery = option.MaxBattery / 2
         option.Proj.append( HourlyProj( time=self.hourlyData[0].TimeOfDay, battery=battery ) )
+        diagHourly = HourlyProj()
         for data in self.hourlyData:
             oldSolar = -data.SolarProd
             if oldSolar < 0.02: oldSolar = 0 # Clean up output by eliminating trivial solar kWh due to CT accuracy limits
@@ -299,7 +304,11 @@ class   HomeSolar:
             # Hold remaining battery for next hour
             battery = newHour.Battery
             if verbose:
+                diagHourly = diagHourly + newHour
                 print( newHour )
+        if diagHourly.Grid or diagHourly.Charging or diagHourly.Export:
+            print( f"Totals:\n{diagHourly}" )
+            diagHourly = HourlyProj()
 
     def ProcessDataFiles( self, pgeData, vueData, verbose = False ):
         # Note: Both data files have 23 entries for start of DST, 3/10/24
