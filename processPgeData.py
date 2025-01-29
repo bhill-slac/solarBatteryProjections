@@ -17,7 +17,60 @@ vueSolarLabel = 'Main panel-Solar/Generation-Solar inverter (kWhs)'
 pgeData = {}
 vueData = {}
 
-# N_HOURS_MAX = 366 * 24
+# PGE Baseline Info 2024
+# https://www.pge.com/en/account/rate-plans/how-rates-work/baseline-allowance.html#tabs-59f0a2f599-item-f6f6231a48-tab
+BaselineTerritory = 'X'     # Our territory from PGE bill
+BaselineSummer    = 9.8     # kWh/day
+BaselineWinter    = 9.7     # kWh/day
+
+# PGE Rate Data 2024
+# https://www.pge.com/assets/pge/docs/account/rate-plans/residential-electric-rate-plan-pricing.pdf
+RatePlans = {
+    "E-TOU-C": {
+        "Summer": {
+            "Baseline": {
+                "OffPeak":  0.40,
+                "Peak":     0.51
+                },
+            "AboveBaseline": {
+                "OffPeak":  0.40,
+                "Peak":     0.51
+                }
+            },
+        "Winter": {
+            "Baseline": {
+                "OffPeak":  0.40,
+                "Peak":     0.51
+                },
+            "AboveBaseline": {
+                "OffPeak":  0.40,
+                "Peak":     0.51
+                }
+            }
+        },
+    "E-TOU-D": {
+        "Summer": {
+            "OffPeak":  0.43,
+            "Peak":     0.57
+            },
+        "Winter": {
+            "OffPeak":  0.44,
+            "Peak":     0.48
+            }
+        },
+    "E-ELEC": {
+        "Summer": {
+            "OffPeak":      0.40,
+            "PartialPeak":  0.45,
+            "Peak":         0.62
+            },
+        "Winter": {
+            "OffPeak":      0.35,
+            "PartialPeak":  0.36,
+            "Peak":         0.38
+            }
+        }
+    }
 
 def isPeakTime( timeOfDay, ratePlan ):
     if ratePlan == 'E-TOU-D':
@@ -109,25 +162,29 @@ def isWinterOffPeakTime( timeOfDay, ratePlan ):
 class   HourlyProj:
     def __init__( self, time=None, grid=0, battery=0, charging=0, newSolar=0, oldSolar=0, export=0 ):
         self.Grid      = grid      # kWh
+        self.Usage     = grid      # Keep total usage separate from grid import for easier diagnostics
         self.Battery   = battery   # kWh
         self.Charging  = charging  # kWh
         self.NewSolar  = newSolar  # kWh
         self.OldSolar  = oldSolar  # kWh
         self.Export    = export    # kWh
+        self.Cost      = 0         # $
         self.TimeOfDay = datetime.datetime.now() if time == None else time
 
     def __str__( self ):
-        #return f"{self.TimeOfDay}: Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}" 
-        return f"{self.TimeOfDay}: Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}, NewSolar={self.NewSolar:>6.2f}, OldSolar={self.OldSolar:>6.2f}" 
+        #return f"{self.TimeOfDay}: Cost={self.Cost:>6.2f}, Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}" 
+        return f"{self.TimeOfDay}: Cost=${self.Cost:>6.2f}, Usage={self.Usage:>6.2f}, Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}, NewSolar={self.NewSolar:>6.2f}, OldSolar={self.OldSolar:>6.2f}" 
 
     def __add__( self, other ):
         # Note: Battery does not get added
         result = self
         result.Grid     += other.Grid
+        result.Usage    += other.Usage
         result.Charging += other.Charging
         result.NewSolar += other.NewSolar
         result.OldSolar += other.OldSolar
         result.Export   += other.Export
+        result.Cost     += other.Cost
         result.TimeOfDay = max( result.TimeOfDay, other.TimeOfDay )
         return result
 
@@ -186,6 +243,12 @@ class   HourlyProj:
         if self.Grid < 0:
             print( "Error: {self}" )
  
+    def ExportBatteryToGrid( self, maxExport, options ):
+        if self.Battery <= 0:
+            return
+        availExport = max( self.Battery, maxExport, options.MaxOutput )
+        self.Export += availExport
+ 
     def ExportNewSolarToGrid( self ):
         if self.NewSolar > 0:
             self.Export += self.NewSolar
@@ -195,7 +258,118 @@ class   HourlyProj:
         if self.OldSolar > 0:
             self.Export += self.OldSolar
             self.OldSolar = 0
- 
+            self.NewSolar = 0
+
+    def DetermineCost( self, options, dailyTotal=0 ):
+        ratePlan = options.RatePlan
+        if ratePlan not in RatePlans:
+            print( "Error: Rate Plan %s not supported!" % ratePlan )
+            return 0
+        if self.Grid < 0:
+            print( "Error: Negative grid usage must be applied as Export!" )
+            return 0
+        kWh = self.Grid
+        if ratePlan == "E-TOU-C":
+            if isSummerPeakTime(self.TimeOfDay,ratePlan):
+                if BaselineSummer > dailyTotal:
+                    # BaselineTotel = 9.8
+                    # dailyTotal = 8.2
+                    # kWh = 2.0
+                    # 1.6 kWh @ baseline
+                    # .4 kWh above baseline
+                    baselineUsage = min(kWh, BaselineSummer-dailyTotal)
+                    self.Cost = baselineUsage * RatePlans[ratePlan]["Summer"]["Baseline"]["Peak"]
+                    kWh = min(baselineUsage-kWh,0)
+                self.Cost += kWh * RatePlans[ratePlan]["Summer"]["AboveBaseline"]["Peak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Summer"]["AboveBaseline"]["Peak"]
+            elif isWinterPeakTime(self.TimeOfDay,ratePlan):
+                if BaselineWinter > dailyTotal:
+                    baselineUsage = min(kWh, BaselineWinter-dailyTotal)
+                    self.Cost = baselineUsage * RatePlans[ratePlan]["Winter"]["Baseline"]["Peak"]
+                    kWh = min(baselineUsage-kWh,0)
+                self.Cost += kWh * RatePlans[ratePlan]["Winter"]["AboveBaseline"]["Peak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Winter"]["AboveBaseline"]["Peak"]
+            elif isSummerPartialPeakTime(self.TimeOfDay,ratePlan):
+                if BaselineSummer > dailyTotal:
+                    baselineUsage = min(kWh, BaselineSummer-dailyTotal)
+                    self.Cost = baselineUsage * RatePlans[ratePlan]["Summer"]["Baseline"]["PartialPeak"]
+                    kWh = min(baselineUsage-kWh,0)
+                self.Cost += kWh * RatePlans[ratePlan]["Summer"]["AboveBaseline"]["PartialPeak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Summer"]["AboveBaseline"]["PartialPeak"]
+            elif isWinterPartialPeakTime(self.TimeOfDay,ratePlan):
+                if BaselineWinter > dailyTotal:
+                    baselineUsage = min(kWh, BaselineWinter-dailyTotal)
+                    self.Cost = baselineUsage * RatePlans[ratePlan]["Winter"]["Baseline"]["PartialPeak"]
+                    kWh = min(baselineUsage-kWh,0)
+                self.Cost += kWh * RatePlans[ratePlan]["Winter"]["AboveBaseline"]["PartialPeak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Winter"]["AboveBaseline"]["PartialPeak"]
+            elif isSummerOffPeakTime(self.TimeOfDay,ratePlan):
+                if BaselineSummer > dailyTotal:
+                    baselineUsage = min(kWh, BaselineSummer-dailyTotal)
+                    self.Cost = baselineUsage * RatePlans[ratePlan]["Summer"]["Baseline"]["OffPeak"]
+                    kWh = min(baselineUsage-kWh,0)
+                self.Cost += kWh * RatePlans[ratePlan]["Summer"]["AboveBaseline"]["OffPeak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Summer"]["AboveBaseline"]["OffPeak"]
+            elif isWinterOffPeakTime(self.TimeOfDay,ratePlan):
+                if BaselineWinter > dailyTotal:
+                    baselineUsage = min(kWh, BaselineWinter-dailyTotal)
+                    self.Cost = baselineUsage * RatePlans[ratePlan]["Winter"]["Baseline"]["OffPeak"]
+                    kWh = min(baselineUsage-kWh,0)
+                self.Cost += kWh * RatePlans[ratePlan]["Winter"]["AboveBaseline"]["OffPeak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Winter"]["AboveBaseline"]["OffPeak"]
+        elif ratePlan == "E-TOU-D":
+            if isSummerPeakTime(self.TimeOfDay,ratePlan):
+                self.Cost = kWh * RatePlans[ratePlan]["Summer"]["Peak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Summer"]["Peak"]
+            elif isWinterPeakTime(self.TimeOfDay,ratePlan):
+                self.Cost += kWh * RatePlans[ratePlan]["Winter"]["Peak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Winter"]["Peak"]
+            elif isSummerOffPeakTime(self.TimeOfDay,ratePlan):
+                self.Cost = kWh * RatePlans[ratePlan]["Summer"]["OffPeak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Summer"]["OffPeak"]
+            elif isWinterOffPeakTime(self.TimeOfDay,ratePlan):
+                self.Cost += kWh * RatePlans[ratePlan]["Winter"]["OffPeak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Winter"]["OffPeak"]
+        elif ratePlan == "E-ELEC":
+            if isSummerPeakTime(self.TimeOfDay,ratePlan):
+                self.Cost = kWh * RatePlans[ratePlan]["Summer"]["Peak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Summer"]["Peak"]
+            elif isWinterPeakTime(self.TimeOfDay,ratePlan):
+                self.Cost += kWh * RatePlans[ratePlan]["Winter"]["Peak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Winter"]["Peak"]
+            elif isSummerPartialPeakTime(self.TimeOfDay,ratePlan):
+                self.Cost = kWh * RatePlans[ratePlan]["Summer"]["PartialPeak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Summer"]["PartialPeak"]
+            elif isWinterPartialPeakTime(self.TimeOfDay,ratePlan):
+                self.Cost += kWh * RatePlans[ratePlan]["Winter"]["PartialPeak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Winter"]["PartialPeak"]
+            elif isSummerOffPeakTime(self.TimeOfDay,ratePlan):
+                self.Cost = kWh * RatePlans[ratePlan]["Summer"]["OffPeak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Summer"]["OffPeak"]
+            elif isWinterOffPeakTime(self.TimeOfDay,ratePlan):
+                self.Cost += kWh * RatePlans[ratePlan]["Winter"]["OffPeak"]
+                if options.NEM == '1.0':
+                    self.Cost -= self.Export * RatePlans[ratePlan]["Winter"]["OffPeak"]
+        else:
+            print( "Rate plan %s not supported!" % ratePlan )
+        if options.NEM == '3.0':
+            self.Cost -= self.Export * 0.06
+
 #   Options for home solar projections
 #   opt1 = Option( 'E-ELEC', '1.0', 13.5, 5600 )
 class   Option:
@@ -235,13 +409,23 @@ class   HomeSolar:
         print( f'Adding option: {option}' )
         battery = option.MaxBattery / 2
         option.Proj.append( HourlyProj( time=self.hourlyData[0].TimeOfDay, battery=battery ) )
-        diagHourly = HourlyProj()
+        diagTotals = HourlyProj()
+        diagDay  = HourlyProj()
+        priorDay = 0
+        dailyTotal = 0
         for data in self.hourlyData:
             oldSolar = -data.SolarProd
             if oldSolar < 0.02: oldSolar = 0 # Clean up output by eliminating trivial solar kWh due to CT accuracy limits
             newSolar = oldSolar * (option.NewSolarProd / oldSolarYearlyProd)
+
+            if  priorDay != data.TimeOfDay.day:
+                priorDay = data.TimeOfDay.day
+                dailyTotal = 0
+                if diagDay.Grid or diagDay.Charging or diagDay.Export:
+                    print( f"DiagDay:\n{diagDay}" )
+                diagDay = HourlyProj(data.TimeOfDay)
             verbose = False # DebugPeakVsOffPeakTimes(data.TimeOfDay)
-            verbose = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 8, 1 )
+            verbose = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 9, 1 )
 
             newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, battery=battery, oldSolar=oldSolar, newSolar=newSolar )
             #if verbose: print( newHour )
@@ -268,13 +452,13 @@ class   HomeSolar:
                 newHour.ApplyNewSolarToGrid( )
                 if option.NEM == '1.0':
                     # Only use battery for 3-4pm partial peak if we can cover peak usage too
-                    if data.TimeOfDay.hour == 3 and newHour.Battery > data.Usage + estPeakUsage:
+                    if data.TimeOfDay.hour != 15 or newHour.Battery <= data.Usage + estPeakUsage:
                         newHour.ApplyBatteryToGrid( )
                     newHour.ApplyOldSolarToGrid( )
                 else:
                     newHour.ApplyOldSolarToGrid( )
                     # Only use battery if we can cover peak usage too
-                    if newHour.Battery > data.Usage + estPeakUsage:
+                    if data.TimeOfDay.hour != 15 or newHour.Battery <= data.Usage + estPeakUsage:
                         newHour.ApplyBatteryToGrid( )
             elif isOffPeakTime( data.TimeOfDay, option.RatePlan ):
                 #
@@ -300,15 +484,18 @@ class   HomeSolar:
                 newHour.ExportNewSolarToGrid( )
             newHour.ExportOldSolarToGrid( )
             newHour.TimeOfDay += timedelta( minutes=59, seconds=59 )
+ 
+            # Determine costs for this hour
+            newHour.DetermineCost( option, dailyTotal )
 
             # Hold remaining battery for next hour
             battery = newHour.Battery
+            diagTotals = diagTotals + newHour
             if verbose:
-                diagHourly = diagHourly + newHour
+                diagDay = diagDay + newHour
                 print( newHour )
-        if diagHourly.Grid or diagHourly.Charging or diagHourly.Export:
-            print( f"Totals:\n{diagHourly}" )
-            diagHourly = HourlyProj()
+        if diagTotals.Grid or diagTotals.Charging or diagTotals.Export:
+            print( f"Totals:\n{diagTotals}" )
 
     def ProcessDataFiles( self, pgeData, vueData, verbose = False ):
         # Note: Both data files have 23 entries for start of DST, 3/10/24
@@ -470,8 +657,8 @@ def main(argv=None):
     myHomeSolar = HomeSolar()
     myHomeSolar.ProcessDataFiles( pgeData, vueData, options.verbose )
 
-    #myHomeSolar.AddOption( Option( 'E-TOU-D', '1.0', 0, 0 ) )
-    #myHomeSolar.AddOption( Option( 'E-TOU-C', '1.0', 0, 0 ) )
+    myHomeSolar.AddOption( Option( 'E-TOU-D', '1.0', 0, 0 ) )
+    myHomeSolar.AddOption( Option( 'E-TOU-C', '1.0', 0, 0 ) )
     myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 0 ) )
     #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 5600 ) )
     myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 11214 ) )
