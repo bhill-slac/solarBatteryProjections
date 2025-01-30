@@ -2,6 +2,7 @@
 import csv
 import sys
 import argparse
+import calendar
 import datetime
 import dateutil
 from datetime import timedelta
@@ -123,6 +124,18 @@ class   HourlyData:
         self.SolarProd = solarProd
         self.TimeOfDay = timeOfDay
 
+def isSummerTime( timeOfDay ):
+    # Summer is June through end of Sept
+    if timeOfDay.month >= 6 and timeOfDay.month <= 9:
+        return True
+    return False
+
+def isWinterTime( timeOfDay ):
+    # Winter is Oct through end of May
+    if timeOfDay.month <= 5 or timeOfDay.month >= 10:
+        return True
+    return False
+
 def isSummerPeakTime( timeOfDay, ratePlan ):
     # Summer is June through end of Sept
     if timeOfDay.month >= 6 and timeOfDay.month <= 9:
@@ -160,24 +173,26 @@ def isWinterOffPeakTime( timeOfDay, ratePlan ):
     return False
 
 class   HourlyProj:
-    def __init__( self, time=None, grid=0, battery=0, charging=0, newSolar=0, oldSolar=0, export=0 ):
+    def __init__( self, time=None, grid=0, usage=0, battery=0, charging=0, newSolar=0, oldSolar=0, export=0, cost=0 ):
         self.Grid      = grid      # kWh
-        self.Usage     = grid      # Keep total usage separate from grid import for easier diagnostics
+        self.Usage     = usage     # Keep total usage separate from grid import for easier diagnostics
         self.Battery   = battery   # kWh
         self.Charging  = charging  # kWh
         self.NewSolar  = newSolar  # kWh
         self.OldSolar  = oldSolar  # kWh
         self.Export    = export    # kWh
-        self.Cost      = 0         # $
-        self.TimeOfDay = datetime.datetime.now() if time == None else time
+        self.Cost      = cost      # $
+        self.TimeOfDay = datetime.datetime(year=2000,month=1,day=1) if time == None else time
 
     def __str__( self ):
         #return f"{self.TimeOfDay}: Cost={self.Cost:>6.2f}, Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}" 
         return f"{self.TimeOfDay}: Cost=${self.Cost:>6.2f}, Usage={self.Usage:>6.2f}, Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}, NewSolar={self.NewSolar:>6.2f}, OldSolar={self.OldSolar:>6.2f}" 
 
+    # Arithmetic operators
     def __add__( self, other ):
         # Note: Battery does not get added
-        result = self
+        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
+                            newSolar=self.NewSolar, oldSolar=self.OldSolar, export=self.Export, cost=self.Cost )
         result.Grid     += other.Grid
         result.Usage    += other.Usage
         result.Charging += other.Charging
@@ -186,6 +201,30 @@ class   HourlyProj:
         result.Export   += other.Export
         result.Cost     += other.Cost
         result.TimeOfDay = max( result.TimeOfDay, other.TimeOfDay )
+        return result
+    def __truediv__( self, other ):
+        # Note: Battery and TimeOfDay do not get modified
+        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
+                            newSolar=self.NewSolar, oldSolar=self.OldSolar, export=self.Export, cost=self.Cost )
+        result.Grid     /= other
+        result.Usage    /= other
+        result.Charging /= other
+        result.NewSolar /= other
+        result.OldSolar /= other
+        result.Export   /= other
+        result.Cost     /= other
+        return result
+    def __mul__( self, other ):
+        # Note: Battery and TimeOfDay do not get modified
+        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
+                            newSolar=self.NewSolar, oldSolar=self.OldSolar, export=self.Export, cost=self.Cost )
+        result.Grid     *= other
+        result.Usage    *= other
+        result.Charging *= other
+        result.NewSolar *= other
+        result.OldSolar *= other
+        result.Export   *= other
+        result.Cost     *= other
         return result
 
     def ApplyBatteryToGrid( self ):
@@ -402,6 +441,7 @@ def DebugThisDay( timeOfDay, year, month, day ):
 class   HomeSolar:
     def __init__( self ):
         self.hourlyData = []
+        self.hourlyProj = []
         self.options = []
 
     def AddOption( self, option ):
@@ -423,11 +463,11 @@ class   HomeSolar:
                 dailyTotal = 0
                 if diagDay.Grid or diagDay.Charging or diagDay.Export:
                     print( f"DiagDay:\n{diagDay}" )
-                diagDay = HourlyProj(data.TimeOfDay)
+                diagDay = HourlyProj(time=data.TimeOfDay)
             verbose = False # DebugPeakVsOffPeakTimes(data.TimeOfDay)
-            verbose = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 9, 1 )
+            verbose = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 8, 5 )
 
-            newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, battery=battery, oldSolar=oldSolar, newSolar=newSolar )
+            newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, usage=data.Usage, battery=battery, oldSolar=oldSolar, newSolar=newSolar )
             #if verbose: print( newHour )
             if isPeakTime( data.TimeOfDay, option.RatePlan ):
                 #
@@ -494,8 +534,68 @@ class   HomeSolar:
             if verbose:
                 diagDay = diagDay + newHour
                 print( newHour )
+
+            # Add newHour to computed projections
+            self.hourlyProj.append( newHour )
+
         if diagTotals.Grid or diagTotals.Charging or diagTotals.Export:
             print( f"Totals:\n{diagTotals}" )
+
+        # Compute average hourly data for Summer, Winter, and diagMonth
+        diagMonth = 8
+        diagMonthDays = None
+        priorDay = 0
+        SummerTotals            = HourlyProj()
+        SummerPeakTotals        = HourlyProj()
+        SummerPartialPeakTotals = HourlyProj()
+        SummerOffPeakTotals     = HourlyProj()
+        WinterTotals            = HourlyProj()
+        WinterPeakTotals        = HourlyProj()
+        WinterPartialPeakTotals = HourlyProj()
+        WinterOffPeakTotals     = HourlyProj()
+        diagMonthTotals = HourlyProj()
+        for newHour in self.hourlyProj:
+            if isSummerTime( newHour.TimeOfDay ):
+                SummerTotals = SummerTotals + newHour
+            if isSummerPeakTime( newHour.TimeOfDay, option.RatePlan ):
+                SummerPeakTotals = SummerPeakTotals + newHour
+            if isSummerPartialPeakTime( newHour.TimeOfDay, option.RatePlan ):
+                SummerPartialPeakTotals = SummerPartialPeakTotals + newHour
+            if isSummerOffPeakTime( newHour.TimeOfDay, option.RatePlan ):
+                SummerOffPeakTotals += newHour
+            if isWinterTime( newHour.TimeOfDay ):
+                WinterTotals += newHour
+            if isWinterPeakTime( newHour.TimeOfDay, option.RatePlan ):
+                WinterPeakTotals += newHour
+            if isWinterPartialPeakTime( newHour.TimeOfDay, option.RatePlan ):
+                WinterPartialPeakTotals += newHour
+            if isWinterOffPeakTime( newHour.TimeOfDay, option.RatePlan ):
+                WinterOffPeakTotals += newHour
+            if newHour.TimeOfDay.month == diagMonth:
+                diagMonthTotals += newHour
+                if not diagMonthDays:
+                    diagMonthFirstDay, diagMonthDays = calendar.monthrange( newHour.TimeOfDay.year, diagMonth )
+        SummerAvg            = SummerTotals / (365 * 4 / 12)
+        SummerPeakAvg        = SummerPeakTotals / (365 * 4 / 12)
+        SummerPartialPeakAvg = SummerPartialPeakTotals / (365 * 4 / 12)
+        SummerOffPeakAvg     = SummerOffPeakTotals / (365 * 4 / 12)
+        WinterAvg            = WinterTotals / (365 * 8 / 12)
+        WinterPeakAvg        = WinterPeakTotals / (365 * 8 / 12)
+        WinterPartialPeakAvg = WinterPartialPeakTotals / (365 * 8 / 12)
+        WinterOffPeakAvg     = WinterOffPeakTotals / (365 * 8 / 12)
+        diagMonthAvg         = diagMonthTotals / diagMonthDays
+        print( f"Summer Totals:\n{SummerTotals}" )
+        print( f"Summer Avg:\n{SummerAvg}" )
+        print( f"Summer Peak Totals:\n{SummerPeakTotals}" )
+        print( f"Summer Peak Avg:\n{SummerPeakAvg}" )
+        print( f"Summer PartialPeak Avg:\n{SummerPartialPeakAvg}" )
+        print( f"Summer OffPeak Avg:\n{SummerOffPeakAvg}" )
+        print( f"Winter Totals:\n{WinterTotals}" )
+        print( f"Winter Avg:\n{WinterAvg}" )
+        print( f"Winter Peak Avg:\n{WinterPeakAvg}" )
+        print( f"Winter PartialPeak Avg:\n{WinterPartialPeakAvg}" )
+        print( f"Winter OffPeak Avg:\n{WinterOffPeakAvg}" )
+        print( f"{calendar.month_name[diagMonth]}  Totals:\n{diagMonthTotals}" )
 
     def ProcessDataFiles( self, pgeData, vueData, verbose = False ):
         # Note: Both data files have 23 entries for start of DST, 3/10/24
