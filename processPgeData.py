@@ -173,29 +173,37 @@ def isWinterOffPeakTime( timeOfDay, ratePlan ):
     return False
 
 class   HourlyProj:
-    def __init__( self, time=None, grid=0, usage=0, battery=0, charging=0, newSolar=0, oldSolar=0, export=0, cost=0 ):
-        self.Grid      = grid      # kWh
-        self.Usage     = usage     # Keep total usage separate from grid import for easier diagnostics
-        self.Battery   = battery   # kWh
-        self.Charging  = charging  # kWh
+    def __init__( self, time=None, grid=0, usage=0, battery=0, charging=0, newSolar=0, oldSolar=0, newExcess=0, oldExcess=0, export=0, cost=0 ):
+        # Keep these values as the input conditions
+        self.TimeOfDay = datetime.datetime(year=2000,month=1,day=1) if time == None else time
+        self.Usage     = usage     # kWh
         self.NewSolar  = newSolar  # kWh
         self.OldSolar  = oldSolar  # kWh
-        self.Export    = export    # kWh
+        # These values get revised as we do hourly processing
+        self.Grid      = grid      # Grid import kWh
+        self.Export    = export    # Grid Export kWh
+        self.Battery   = battery   # Hourly Battery charge kWh
+        self.Charging  = charging  # Charging kWh
+        self.NewExcess = newExcess # Excess New Solar kWh
+        self.OldExcess = oldExcess # Excess Old Solar kWh
         self.Cost      = cost      # $
-        self.TimeOfDay = datetime.datetime(year=2000,month=1,day=1) if time == None else time
 
     def __str__( self ):
         #return f"{self.TimeOfDay}: Cost={self.Cost:>6.2f}, Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}" 
-        return f"{self.TimeOfDay}: Cost=${self.Cost:>6.2f}, Usage={self.Usage:>6.2f}, Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}, NewSolar={self.NewSolar:>6.2f}, OldSolar={self.OldSolar:>6.2f}" 
+        return f"{self.TimeOfDay}: Usage={self.Usage:>6.2f}, NewSolar={self.NewSolar:>6.2f}, OldSolar={self.OldSolar:>6.2f}, Grid={self.Grid:>6.2f}, Export={self.Export:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, NewExcess={self.NewExcess:>6.2f}, OldExcess={self.OldExcess:>6.2f}, Cost=${self.Cost:>6.2f}"
 
     # Arithmetic operators
     def __add__( self, other ):
         # Note: Battery does not get added
         result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
-                            newSolar=self.NewSolar, oldSolar=self.OldSolar, export=self.Export, cost=self.Cost )
+                            newExcess=self.NewExcess, oldExcess=self.OldExcess,
+                            newSolar=self.NewSolar, oldSolar=self.OldSolar,
+                            export=self.Export, cost=self.Cost )
         result.Grid     += other.Grid
         result.Usage    += other.Usage
         result.Charging += other.Charging
+        result.NewExcess+= other.NewExcess
+        result.OldExcess+= other.OldExcess
         result.NewSolar += other.NewSolar
         result.OldSolar += other.OldSolar
         result.Export   += other.Export
@@ -205,10 +213,13 @@ class   HourlyProj:
     def __truediv__( self, other ):
         # Note: Battery and TimeOfDay do not get modified
         result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
-                            newSolar=self.NewSolar, oldSolar=self.OldSolar, export=self.Export, cost=self.Cost )
+                            newExcess=self.NewExcess, oldExcess=self.OldExcess, newSolar=self.NewSolar, oldSolar=self.OldSolar,
+                            export=self.Export, cost=self.Cost )
         result.Grid     /= other
         result.Usage    /= other
         result.Charging /= other
+        result.NewExcess/= other
+        result.OldExcess/= other
         result.NewSolar /= other
         result.OldSolar /= other
         result.Export   /= other
@@ -217,10 +228,13 @@ class   HourlyProj:
     def __mul__( self, other ):
         # Note: Battery and TimeOfDay do not get modified
         result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
-                            newSolar=self.NewSolar, oldSolar=self.OldSolar, export=self.Export, cost=self.Cost )
+                            newExcess=self.NewExcess, oldExcess=self.OldExcess, newSolar=self.NewSolar, oldSolar=self.OldSolar,
+                            export=self.Export, cost=self.Cost )
         result.Grid     *= other
         result.Usage    *= other
         result.Charging *= other
+        result.NewExcess*= other
+        result.OldExcess*= other
         result.NewSolar *= other
         result.OldSolar *= other
         result.Export   *= other
@@ -239,46 +253,46 @@ class   HourlyProj:
             print( "Error: {self}" )
  
     def ApplyNewSolarToBattery( self, options ):
-        if self.NewSolar <= 0:
+        if self.NewExcess <= 0:
             return
         if self.Battery >= options.MaxBattery:
             return
-        availCharge = self.NewSolar * options.Efficiency / 100
+        availCharge = self.NewExcess * options.Efficiency / 100
         newCharge = min( availCharge, options.MaxBattery - self.Battery )
         self.Battery = min( self.Battery + newCharge, options.MaxBattery )
         self.Charging += newCharge
-        self.NewSolar = max( 0, self.NewSolar - newCharge / (options.Efficiency/100) )
+        self.NewExcess = max( 0, self.NewExcess - newCharge / (options.Efficiency/100) )
  
     def ApplyOldSolarToBattery( self, options ):
-        if self.OldSolar <= 0:
+        if self.OldExcess <= 0:
             return
         if self.Battery >= options.MaxBattery:
             return
-        availCharge = self.OldSolar * options.Efficiency / 100
+        availCharge = self.OldExcess * options.Efficiency / 100
         newCharge = min( availCharge, options.MaxBattery - self.Battery )
         self.Battery = min( self.Battery + newCharge, options.MaxBattery )
         self.Charging += newCharge
-        self.OldSolar = max( 0, self.OldSolar - newCharge / (options.Efficiency/100) )
+        self.OldExcess = max( 0, self.OldExcess - newCharge / (options.Efficiency/100) )
 
     def ApplyOldSolarToGrid( self ):
-        if self.Grid > 0 and self.OldSolar > 0:
-            if self.OldSolar >= self.Grid:
-                self.OldSolar -= self.Grid
+        if self.Grid > 0 and self.OldExcess > 0:
+            if self.OldExcess >= self.Grid:
+                self.OldExcess -= self.Grid
                 self.Grid = 0
             else:
-                self.Grid -= self.OldSolar
-                self.OldSolar = 0
+                self.Grid -= self.OldExcess
+                self.OldExcess = 0
         if self.Grid < 0:
             print( "Error: {self}" )
  
     def ApplyNewSolarToGrid( self ):
-        if self.Grid > 0 and self.NewSolar > 0:
-            if self.NewSolar >= self.Grid:
-                self.NewSolar -= self.Grid
+        if self.Grid > 0 and self.NewExcess > 0:
+            if self.NewExcess >= self.Grid:
+                self.NewExcess -= self.Grid
                 self.Grid = 0
             else:
-                self.Grid -= self.NewSolar
-                self.NewSolar = 0
+                self.Grid -= self.NewExcess
+                self.NewExcess = 0
         if self.Grid < 0:
             print( "Error: {self}" )
  
@@ -289,15 +303,14 @@ class   HourlyProj:
         self.Export += availExport
  
     def ExportNewSolarToGrid( self ):
-        if self.NewSolar > 0:
-            self.Export += self.NewSolar
-            self.NewSolar = 0
+        if self.NewExcess > 0:
+            self.Export += self.NewExcess
+            self.NewExcess = 0
 
     def ExportOldSolarToGrid( self ):
-        if self.OldSolar > 0:
-            self.Export += self.OldSolar
-            self.OldSolar = 0
-            self.NewSolar = 0
+        if self.OldExcess > 0:
+            self.Export += self.OldExcess
+            self.OldExcess = 0
 
     def DetermineCost( self, options, dailyTotal=0 ):
         ratePlan = options.RatePlan
@@ -451,6 +464,7 @@ class   HomeSolar:
         option.Proj.append( HourlyProj( time=self.hourlyData[0].TimeOfDay, battery=battery ) )
         diagTotals = HourlyProj()
         diagDay  = HourlyProj()
+        self.hourlyProj = []
         priorDay = 0
         dailyTotal = 0
         for data in self.hourlyData:
@@ -467,7 +481,8 @@ class   HomeSolar:
             verbose = False # DebugPeakVsOffPeakTimes(data.TimeOfDay)
             verbose = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 8, 5 )
 
-            newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, usage=data.Usage, battery=battery, oldSolar=oldSolar, newSolar=newSolar )
+            newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, usage=data.Usage, battery=battery,
+                                oldExcess=oldSolar, newExcess=newSolar, oldSolar=oldSolar, newSolar=newSolar )
             #if verbose: print( newHour )
             if isPeakTime( data.TimeOfDay, option.RatePlan ):
                 #
@@ -506,7 +521,7 @@ class   HomeSolar:
                 #
                 newHour.ApplyNewSolarToGrid( )
                 newHour.ApplyOldSolarToGrid( )
-                
+
                 newHour.ApplyNewSolarToBattery( option )
                 if option.NewSolarProd == 0 or option.NEM == '3.0':
                     # If we add new solar under NEM 1.0 via non-export, 
@@ -539,12 +554,13 @@ class   HomeSolar:
             self.hourlyProj.append( newHour )
 
         if diagTotals.Grid or diagTotals.Charging or diagTotals.Export:
-            print( f"Totals:\n{diagTotals}" )
+            print( f"DiagTotals:\n{diagTotals}" )
 
         # Compute average hourly data for Summer, Winter, and diagMonth
         diagMonth = 8
         diagMonthDays = None
         priorDay = 0
+        YearlyTotals            = HourlyProj()
         SummerTotals            = HourlyProj()
         SummerPeakTotals        = HourlyProj()
         SummerPartialPeakTotals = HourlyProj()
@@ -555,6 +571,7 @@ class   HomeSolar:
         WinterOffPeakTotals     = HourlyProj()
         diagMonthTotals = HourlyProj()
         for newHour in self.hourlyProj:
+            YearlyTotals = YearlyTotals + newHour
             if isSummerTime( newHour.TimeOfDay ):
                 SummerTotals = SummerTotals + newHour
             if isSummerPeakTime( newHour.TimeOfDay, option.RatePlan ):
@@ -584,18 +601,22 @@ class   HomeSolar:
         WinterPartialPeakAvg = WinterPartialPeakTotals / (365 * 8 / 12)
         WinterOffPeakAvg     = WinterOffPeakTotals / (365 * 8 / 12)
         diagMonthAvg         = diagMonthTotals / diagMonthDays
-        print( f"Summer Totals:\n{SummerTotals}" )
-        print( f"Summer Avg:\n{SummerAvg}" )
-        print( f"Summer Peak Totals:\n{SummerPeakTotals}" )
-        print( f"Summer Peak Avg:\n{SummerPeakAvg}" )
-        print( f"Summer PartialPeak Avg:\n{SummerPartialPeakAvg}" )
-        print( f"Summer OffPeak Avg:\n{SummerOffPeakAvg}" )
-        print( f"Winter Totals:\n{WinterTotals}" )
-        print( f"Winter Avg:\n{WinterAvg}" )
-        print( f"Winter Peak Avg:\n{WinterPeakAvg}" )
-        print( f"Winter PartialPeak Avg:\n{WinterPartialPeakAvg}" )
-        print( f"Winter OffPeak Avg:\n{WinterOffPeakAvg}" )
-        print( f"{calendar.month_name[diagMonth]}  Totals:\n{diagMonthTotals}" )
+        print( f"Yearly      Totals: {YearlyTotals}" )
+        print( f"Summer      Totals: {SummerTotals}" )
+        print( f"Summer Peak Totals: {SummerPeakTotals}" )
+        print( f"Summer PaPk Totals: {SummerPartialPeakTotals}" )
+        print( f"Summer OffP Totals: {SummerOffPeakTotals}" )
+        print( f"Summer         Avg: {SummerAvg}" )
+        print( f"Summer Peak    Avg: {SummerPeakAvg}" )
+        print( f"Summer PaPk    Avg: {SummerPartialPeakAvg}" )
+        print( f"Summer OffP    Avg: {SummerOffPeakAvg}" )
+
+        print( f"Winter      Totals: {WinterTotals}" )
+        print( f"Winter         Avg: {WinterAvg}" )
+        print( f"Winter Peak    Avg: {WinterPeakAvg}" )
+        print( f"Winter PaPk    Avg: {WinterPartialPeakAvg}" )
+        print( f"Winter OffPeak Avg: {WinterOffPeakAvg}" )
+        print( f"{calendar.month_name[diagMonth]}     Totals: {diagMonthTotals}" )
 
     def ProcessDataFiles( self, pgeData, vueData, verbose = False ):
         # Note: Both data files have 23 entries for start of DST, 3/10/24
@@ -609,9 +630,9 @@ class   HomeSolar:
         for hourTime, solarProd in vueData.items():
             if hourTime in pgeData:
                 usage = pgeData[hourTime]
-            # solarProd is negative and needs to be added
-            # to PGE usage to reflect actual usage w/o solar
-            usage = max( 0, usage + solarProd )
+            # solarProd is negative and needs to be combined
+            # with PGE usage to reflect actual usage w/o solar
+            usage = max( 0, usage - solarProd )
             if hourTime < extraHour:
                 self.hourlyData.append( HourlyData( usage, solarProd, hourTime ) )
         if verbose:
@@ -760,9 +781,11 @@ def main(argv=None):
     myHomeSolar.AddOption( Option( 'E-TOU-D', '1.0', 0, 0 ) )
     myHomeSolar.AddOption( Option( 'E-TOU-C', '1.0', 0, 0 ) )
     myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 0 ) )
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 5600 ) )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 5600 ) )
     myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 11214 ) )
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 13.5, 5600 ) )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 13.5, 11214 ) )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 27, 11214 ) )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27, 11214 ) )
     return 0
 
 if __name__ == '__main__':
