@@ -12,6 +12,7 @@ from datetime import timedelta
 # Also look at impact after I washed solar panels 1/17/09
 
 oldSolarYearlyProd = 5732
+nonExportLimit     = 5.0       # Based on rating of SMA 5000 Inverter used for NEM 1.0 application
 
 vueDateLabel  = 'Time Bucket (America/Los_Angeles)'
 vueSolarLabel = 'Main panel-Solar/Generation-Solar inverter (kWhs)'
@@ -300,17 +301,19 @@ class   HourlyProj:
         if self.Battery <= 0:
             return
         availExport = max( self.Battery, maxExport, options.MaxOutput )
-        self.Export += availExport
+        self.Export = max( nonExportLimit, self.Export + availExport )
  
     def ExportNewSolarToGrid( self ):
-        if self.NewExcess > 0:
-            self.Export += self.NewExcess
-            self.NewExcess = 0
+        availExport = min( self.NewExcess, nonExportLimit - self.Export )
+        if availExport > 0:
+            self.Export    += availExport
+            self.NewExcess -= availExport
 
     def ExportOldSolarToGrid( self ):
-        if self.OldExcess > 0:
-            self.Export += self.OldExcess
-            self.OldExcess = 0
+        availExport = min( self.OldExcess, nonExportLimit - self.Export )
+        if availExport > 0:
+            self.Export    += availExport
+            self.OldExcess -= availExport
 
     def DetermineCost( self, options, dailyTotal=0 ):
         ratePlan = options.RatePlan
@@ -554,22 +557,22 @@ class   HomeSolar:
             self.hourlyProj.append( newHour )
 
         if diagTotals.Grid or diagTotals.Charging or diagTotals.Export:
-            print( f"DiagTotals:\n{diagTotals}" )
+            print( f"DiagTotals:         {diagTotals}" )
 
         # Compute average hourly data for Summer, Winter, and diagMonth
         diagMonth = 8
         diagMonthDays = None
         priorDay = 0
-        YearlyTotals            = HourlyProj()
-        SummerTotals            = HourlyProj()
-        SummerPeakTotals        = HourlyProj()
-        SummerPartialPeakTotals = HourlyProj()
-        SummerOffPeakTotals     = HourlyProj()
-        WinterTotals            = HourlyProj()
-        WinterPeakTotals        = HourlyProj()
-        WinterPartialPeakTotals = HourlyProj()
-        WinterOffPeakTotals     = HourlyProj()
-        diagMonthTotals = HourlyProj()
+        YearlyTotals            = HourlyProj(battery=option.MaxBattery)
+        SummerTotals            = HourlyProj(battery=option.MaxBattery)
+        SummerPeakTotals        = HourlyProj(battery=option.MaxBattery)
+        SummerPartialPeakTotals = HourlyProj(battery=option.MaxBattery)
+        SummerOffPeakTotals     = HourlyProj(battery=option.MaxBattery)
+        WinterTotals            = HourlyProj(battery=option.MaxBattery)
+        WinterPeakTotals        = HourlyProj(battery=option.MaxBattery)
+        WinterPartialPeakTotals = HourlyProj(battery=option.MaxBattery)
+        WinterOffPeakTotals     = HourlyProj(battery=option.MaxBattery)
+        diagMonthTotals         = HourlyProj(battery=option.MaxBattery)
         for newHour in self.hourlyProj:
             YearlyTotals = YearlyTotals + newHour
             if isSummerTime( newHour.TimeOfDay ):
