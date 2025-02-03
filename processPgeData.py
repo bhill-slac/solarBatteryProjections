@@ -14,6 +14,9 @@ from datetime import timedelta
 oldSolarYearlyProd = 5732
 nonExportLimit     = 5.0       # Based on rating of SMA 5000 Inverter used for NEM 1.0 application
 
+# Minumum daily PGE charge if we don't use at least accrue at least that much in grid import charges
+pgeMinDailyDeliveryCharge = 0.39167 # Dollars, approx $12 per month
+
 vueDateLabel  = 'Time Bucket (America/Los_Angeles)'
 vueSolarLabel = 'Main panel-Solar/Generation-Solar inverter (kWhs)'
 pgeData = {}
@@ -173,6 +176,9 @@ def isWinterOffPeakTime( timeOfDay, ratePlan ):
         return isOffPeakTime( timeOfDay, ratePlan )
     return False
 
+# class HourlyProj
+# Used to compute hour by hour projections of grid vs solar vs battery status
+# Includes usage, solar production, charging, export, excess solar, etc.
 class   HourlyProj:
     def __init__( self, time=None, grid=0, usage=0, battery=0, charging=0, newSolar=0, oldSolar=0, newExcess=0, oldExcess=0, export=0, cost=0 ):
         # Keep these values as the input conditions
@@ -434,7 +440,7 @@ class   Option:
         self.MaxBattery   = maxBattery    # kWh
         self.Efficiency   = efficiency    # %
         self.NewSolarProd = newSolarProd  # Yearly kWh
-        self.Proj         = []
+        self.Projections         = []
     def __str__( self ):
         return f"RatePlan={self.RatePlan:>7}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, Efficiency={self.Efficiency}, NewSolarProd={self.NewSolarProd}" 
 
@@ -457,17 +463,17 @@ def DebugThisDay( timeOfDay, year, month, day ):
 class   HomeSolar:
     def __init__( self ):
         self.hourlyData = []
-        self.hourlyProj = []
+        #self.hourlyProj = []
         self.options = []
 
-    def AddOption( self, option ):
+    def AddOption( self, option, verbose=False ):
         self.options.append( option )
         print( f'Adding option: {option}' )
         battery = option.MaxBattery / 2
-        option.Proj.append( HourlyProj( time=self.hourlyData[0].TimeOfDay, battery=battery ) )
+        option.Projections.append( HourlyProj( time=self.hourlyData[0].TimeOfDay, battery=battery ) )
         diagTotals = HourlyProj()
         diagDay  = HourlyProj()
-        self.hourlyProj = []
+        #self.hourlyProj = []
         priorDay = 0
         dailyTotal = 0
         for data in self.hourlyData:
@@ -481,12 +487,12 @@ class   HomeSolar:
                 if diagDay.Grid or diagDay.Charging or diagDay.Export:
                     print( f"DiagDay:\n{diagDay}" )
                 diagDay = HourlyProj(time=data.TimeOfDay)
-            verbose = False # DebugPeakVsOffPeakTimes(data.TimeOfDay)
-            verbose = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 8, 5 )
+            #verboseDay = False # DebugPeakVsOffPeakTimes(data.TimeOfDay)
+            verboseDay = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 8, 0 )
 
             newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, usage=data.Usage, battery=battery,
                                 oldExcess=oldSolar, newExcess=newSolar, oldSolar=oldSolar, newSolar=newSolar )
-            #if verbose: print( newHour )
+            #if verboseDay: print( newHour )
             if isPeakTime( data.TimeOfDay, option.RatePlan ):
                 #
                 # Handle Peak periods
@@ -549,15 +555,17 @@ class   HomeSolar:
             # Hold remaining battery for next hour
             battery = newHour.Battery
             diagTotals = diagTotals + newHour
-            if verbose:
+            if verboseDay:
                 diagDay = diagDay + newHour
                 print( newHour )
 
             # Add newHour to computed projections
-            self.hourlyProj.append( newHour )
+            option.Projections.append( newHour )
 
         if diagTotals.Grid or diagTotals.Charging or diagTotals.Export:
             print( f"DiagTotals:         {diagTotals}" )
+        if not verbose:
+            return
 
         # Compute average hourly data for Summer, Winter, and diagMonth
         diagMonth = 8
@@ -573,7 +581,7 @@ class   HomeSolar:
         WinterPartialPeakTotals = HourlyProj(battery=option.MaxBattery)
         WinterOffPeakTotals     = HourlyProj(battery=option.MaxBattery)
         diagMonthTotals         = HourlyProj(battery=option.MaxBattery)
-        for newHour in self.hourlyProj:
+        for newHour in option.Projections:
             YearlyTotals = YearlyTotals + newHour
             if isSummerTime( newHour.TimeOfDay ):
                 SummerTotals = SummerTotals + newHour
@@ -781,14 +789,14 @@ def main(argv=None):
     myHomeSolar = HomeSolar()
     myHomeSolar.ProcessDataFiles( pgeData, vueData, options.verbose )
 
-    myHomeSolar.AddOption( Option( 'E-TOU-D', '1.0', 0, 0 ) )
-    myHomeSolar.AddOption( Option( 'E-TOU-C', '1.0', 0, 0 ) )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 0 ) )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 5600 ) )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 11214 ) )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 13.5, 11214 ) )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 27, 11214 ) )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27, 11214 ) )
+    myHomeSolar.AddOption( Option( 'E-TOU-D', '1.0', 0, 0 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-TOU-C', '1.0', 0, 0 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 0 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 5600 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 11214 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 13.5, 11214 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 27, 11214 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27, 11214 ), verbose=options.verbose )
     return 0
 
 if __name__ == '__main__':
