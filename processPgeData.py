@@ -6,6 +6,10 @@ import calendar
 import datetime
 import dateutil
 from datetime import timedelta
+import IPython
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 # Note: Look for PGE usage on day I shutoff our solar for the day.
 # Should be around Dec 23, 2009
@@ -471,6 +475,69 @@ class   Option:
         #print( f"Est Yearly PGE cost in 25 years={estFutureCostAsIs:$>6.2f}" )
         #print( f"Est Yearly Option cost in 25 years={estFutureCostOfOption:$>6.2f}" )
 
+    def GetDataForDay( self, month, day ):
+        Time = []
+        Usage = []
+        Solar = []
+        Grid = []
+        Export = []
+        Battery = []
+        Charging = []
+        Excess = []
+        Cost = []
+        for hourlyData in self.Projections:
+            if hourlyData.TimeOfDay.month != month:
+                continue
+            if hourlyData.TimeOfDay.day != day:
+                continue
+            if hourlyData.TimeOfDay.minute != 59:    # Computed hourlyData times end in *:59:59
+                continue
+            Time.append( hourlyData.TimeOfDay )
+            Usage.append( hourlyData.Usage )
+            Solar.append( hourlyData.NewSolar + hourlyData.OldSolar )
+            Grid.append( hourlyData.Grid )
+            Export.append( hourlyData.Export )
+            Battery.append( hourlyData.Battery )
+            Charging.append( hourlyData.Charging )
+            Excess.append( hourlyData.NewExcess + hourlyData.OldExcess )
+            Cost.append( hourlyData.Cost )
+        data = {    'TimeOfDay':    np.array(Time),
+                    'Usage':        np.array(Usage),
+                    'solar':        np.array(Solar),
+                    'export':       np.array(Export),
+                    'battery':      np.array(Battery),
+                    'charging':     np.array(Charging),
+                    'excess':       np.array(Excess),
+                    'cost':         np.array(Cost),
+                    'grid':         np.array(Grid) }
+        return data
+
+    def PlotDay( self, month, day ):
+        data = self.GetDataForDay( month, day )
+        self.axs[0].xaxis.set_major_locator(mdates.HourLocator())
+        self.axs[0].xaxis.set_major_formatter(mdates.DateFormatter('%H%p'))
+        self.axs[0].set_xlabel('Time')
+        self.axs[0].set_ylabel('kWh')
+        self.axs[0].set_title(f"Grid Usage Solar and Battery for {month}/{day}")
+        self.axs[0].plot( 'TimeOfDay', 'Usage', data=data, color='xkcd:pale orange' )
+        self.axs[0].plot( 'TimeOfDay', 'solar', data=data, color='xkcd:goldenrod', label='Solar Prod' )
+        self.axs[0].bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=20), align='center', label='Grid' )
+        self.axs[0].bar( 'TimeOfDay', 'solar', data=data, color='xkcd:goldenrod', width=timedelta(minutes=20), align='center', label='Solar' )
+        batteryBottom = data['solar'] - data['battery']
+        self.axs[0].bar( 'TimeOfDay', 'battery', data=data, color='xkcd:sky blue', width=timedelta(minutes=20), align='center', label='Battery', bottom=batteryBottom)
+        self.axs[0].bar( 'TimeOfDay', 'charging', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=20), align='center', label='Charging', bottom='grid' )
+        exportBottom = data['solar'] - data['export']
+        self.axs[0].bar( 'TimeOfDay', 'export', data=data, color='xkcd:fire engine red', width=timedelta(minutes=20), align='center', label='Export', bottom=exportBottom)
+        self.axs[0].xaxis.set_major_locator(mdates.HourLocator())
+        self.axs[0].legend(loc='upper right')
+
+    def PlotOption( self ):
+        self.fig = plt.figure( f"RatePlan={self.RatePlan}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, NewSolarProd={self.NewSolarProd}", figsize=(22,6) )
+        self.axs = self.fig.subplots( 2, 1 )
+        plt.style.use('bmh')
+        self.SelectedDay = datetime.datetime( year=self.Projections[0].TimeOfDay.year, month=1, day=2 )
+        self.PlotDay( self.SelectedDay.month, self.SelectedDay.day )
+
 def DebugPeakVsOffPeakTimes( timeOfDay ):
     debugWinter2Summer = datetime.datetime( year=timeOfDay.year, month=6, day = 1 )
     debugSummer2Winter = datetime.datetime( year=timeOfDay.year, month=10, day = 1 )
@@ -490,8 +557,11 @@ def DebugThisDay( timeOfDay, year, month, day ):
 class   HomeSolar:
     def __init__( self ):
         self.hourlyData = []
-        #self.hourlyProj = []
         self.options = []
+
+    def PlotOptions( self ):
+        for option in self.options:
+            option.PlotOption()
 
     def AddOption( self, option, verbose=False ):
         self.options.append( option )
@@ -516,7 +586,7 @@ class   HomeSolar:
                     print( f"DiagDay:\n{diagDay}" )
                 diagDay = HourlyProj(time=data.TimeOfDay)
             #verboseDay = False # DebugPeakVsOffPeakTimes(data.TimeOfDay)
-            verboseDay = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 8, 0 )
+            verboseDay = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 1, 2 )
 
             newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, usage=data.Usage, battery=battery,
                                 oldExcess=oldSolar, newExcess=newSolar, oldSolar=oldSolar, newSolar=newSolar )
@@ -824,20 +894,28 @@ def main(argv=None):
     myHomeSolar.ProcessDataFiles( pgeData, vueData, options.verbose )
 
     print("Current PGE Rate Plan Costs")
-    myHomeSolar.AddOption( Option( 'E-TOU-D', '1.0', 0, 0, 0 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-TOU-C', '1.0', 0, 0, 0 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( 'E-TOU-D', '1.0', 0, 0, 0 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( 'E-TOU-C', '1.0', 0, 0, 0 ), verbose=options.verbose )
     print("\nNEM 1.0 options")
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 0, 14000 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 5600, 22000 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 10000, 27000 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 0, 14000 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 5600, 22000 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 10000, 27500 ), verbose=options.verbose )
     myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 11214, 29582 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 27, 11214, 29582 + 9800 ), verbose=options.verbose )
-    print("\nNEM 3.0 options")
-    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 13.5, 11214, 29582 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27, 11214, 29582 + 9800 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 40.5, 11214, 29582 + 9800 + 9800 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27, 16000, 35000 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
+    #print("\nNEM 3.0 options")
+    #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 13.5, 11214, 29582 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 40.5, 11214, 29582 + 9800 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27.0, 16000, 35000 + 9800 ), verbose=options.verbose )
 
+    myHomeSolar.PlotOptions()
+
+    #fig = plt.figure( "Solar and Battery Analysis", figsize=(14,40) )
+    #ax = plt.subplot( 1, 2, 1 )
+
+    plt.show()
+    #print( "Starting IPython shell..." )
+    #IPython.embed()
     return 0
 
 if __name__ == '__main__':
