@@ -11,7 +11,7 @@ from datetime import timedelta
 # Should be around Dec 23, 2009
 # Also look at impact after I washed solar panels 1/17/09
 
-estYearlyPgeEscalation  = 0.04      # %
+estYearlyPgeEscalation  = 0.06      # %
 est2024PgeCost          = 5763.54   # Based on 2024 solar and usage using latest PGE E-TOU-D rate plan numbers
 oldSolarYearlyProd      = 5732      # Based on 2024 solar production measured by our Emporia VUE system
 nonExportLimit          = 5.0       # Based on rating of SMA 5000 Inverter used for NEM 1.0 application
