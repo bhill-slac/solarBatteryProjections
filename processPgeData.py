@@ -572,9 +572,9 @@ class   HomeSolar:
             newHour.ApplyNewSolarToBattery( option )
 
             # Export excess solar to grid
-            if option.NEM == '3.0':
-                newHour.ExportNewSolarToGrid( )
             newHour.ExportOldSolarToGrid( )
+            if True or option.NEM == '3.0':
+                newHour.ExportNewSolarToGrid( )
             newHour.TimeOfDay += timedelta( minutes=59, seconds=59 )
  
             # Determine costs for this hour
