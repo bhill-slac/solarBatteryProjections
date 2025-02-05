@@ -11,8 +11,10 @@ from datetime import timedelta
 # Should be around Dec 23, 2009
 # Also look at impact after I washed solar panels 1/17/09
 
-oldSolarYearlyProd = 5732
-nonExportLimit     = 5.0       # Based on rating of SMA 5000 Inverter used for NEM 1.0 application
+estYearlyPgeEscalation  = 0.04      # %
+est2024PgeCost          = 5763.54   # Based on 2024 solar and usage using latest PGE E-TOU-D rate plan numbers
+oldSolarYearlyProd      = 5732      # Based on 2024 solar production measured by our Emporia VUE system
+nonExportLimit          = 5.0       # Based on rating of SMA 5000 Inverter used for NEM 1.0 application
 
 # Minumum daily PGE charge if we don't use at least accrue at least that much in grid import charges
 pgeMinDailyDeliveryCharge = 0.39167 # Dollars, approx $12 per month
@@ -177,9 +179,11 @@ def isWinterOffPeakTime( timeOfDay, ratePlan ):
     return False
 
 # class HourlyProj
-# Used to compute hour by hour projections of grid vs solar vs battery status
-# Includes usage, solar production, charging, export, excess solar, etc.
 class   HourlyProj:
+    """
+    Used to compute hour by hour projections of grid vs solar vs battery status
+    Includes usage, solar production, charging, export, excess solar, etc.
+    """
     def __init__( self, time=None, grid=0, usage=0, battery=0, charging=0, newSolar=0, oldSolar=0, newExcess=0, oldExcess=0, export=0, cost=0 ):
         # Keep these values as the input conditions
         self.TimeOfDay = datetime.datetime(year=2000,month=1,day=1) if time == None else time
@@ -434,15 +438,38 @@ class   HourlyProj:
 #   Options for home solar projections
 #   opt1 = Option( 'E-ELEC', '1.0', 13.5, 5600 )
 class   Option:
-    def __init__( self, ratePlan, nem, maxBattery, newSolarProd, efficiency=95 ):
+    def __init__( self, ratePlan, nem, maxBattery, newSolarProd, systemCost, efficiency=95 ):
         self.RatePlan     = ratePlan      # 'E-ELEC' or 'E-TOU-C' or 'E-TOU-D'
         self.NEM          = nem           # '1.0' or '3.0'
         self.MaxBattery   = maxBattery    # kWh
         self.Efficiency   = efficiency    # %
         self.NewSolarProd = newSolarProd  # Yearly kWh
-        self.Projections         = []
+        self.SystemCost   = systemCost    # $
+        self.YearlyPgeCost= 0             # $
+        self.PaybackYears = 0             # years
+        self.TwentyFiveYearSavings = 0    # $
+        self.Projections   = []
     def __str__( self ):
-        return f"RatePlan={self.RatePlan:>7}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, Efficiency={self.Efficiency}, NewSolarProd={self.NewSolarProd}" 
+        return f"RatePlan={self.RatePlan:>7}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, Efficiency={self.Efficiency}, NewSolarProd={self.NewSolarProd}\nSystemCost=${self.SystemCost:>6.2f}, YearlyPgeCost=${self.YearlyPgeCost:>6.2f}, PaybackYears={self.PaybackYears:>3.1f} yrs, 25YearSavings=${self.TwentyFiveYearSavings:>8.2f}" 
+
+    def ComputeYearlyCosts( self ):
+        YearlyTotals = HourlyProj(battery=self.MaxBattery)
+        for newHour in self.Projections:
+            YearlyTotals = YearlyTotals + newHour
+        self.YearlyPgeCost = YearlyTotals.Cost
+        totalSavings = 0
+        estFutureCostAsIs = est2024PgeCost
+        estFutureCostOfOption = self.YearlyPgeCost
+        for year in range(1,26):
+            thisYearsSavings = estFutureCostAsIs - estFutureCostOfOption
+            totalSavings += thisYearsSavings
+            if self.PaybackYears == 0 and totalSavings >= self.SystemCost:
+                self.PaybackYears = year + (1-(totalSavings-self.SystemCost)/thisYearsSavings)
+            estFutureCostAsIs *= (1 + estYearlyPgeEscalation)
+            estFutureCostOfOption *= (1 + estYearlyPgeEscalation)
+        self.TwentyFiveYearSavings = totalSavings
+        #print( f"Est Yearly PGE cost in 25 years={estFutureCostAsIs:$>6.2f}" )
+        #print( f"Est Yearly Option cost in 25 years={estFutureCostOfOption:$>6.2f}" )
 
 def DebugPeakVsOffPeakTimes( timeOfDay ):
     debugWinter2Summer = datetime.datetime( year=timeOfDay.year, month=6, day = 1 )
@@ -468,7 +495,8 @@ class   HomeSolar:
 
     def AddOption( self, option, verbose=False ):
         self.options.append( option )
-        print( f'Adding option: {option}' )
+        if verbose:
+            print( f'\nAdding option: {option}' )
         battery = option.MaxBattery / 2
         option.Projections.append( HourlyProj( time=self.hourlyData[0].TimeOfDay, battery=battery ) )
         diagTotals = HourlyProj()
@@ -562,8 +590,14 @@ class   HomeSolar:
             # Add newHour to computed projections
             option.Projections.append( newHour )
 
-        if diagTotals.Grid or diagTotals.Charging or diagTotals.Export:
+        # Compute yearly costs, paypack period, and 25 year savings
+        option.ComputeYearlyCosts()
+
+        print( f'\nProjections for: {option}' )
+
+        if True and (diagTotals.Grid or diagTotals.Charging or diagTotals.Export):
             print( f"DiagTotals:         {diagTotals}" )
+
         if not verbose:
             return
 
@@ -789,14 +823,21 @@ def main(argv=None):
     myHomeSolar = HomeSolar()
     myHomeSolar.ProcessDataFiles( pgeData, vueData, options.verbose )
 
-    myHomeSolar.AddOption( Option( 'E-TOU-D', '1.0', 0, 0 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-TOU-C', '1.0', 0, 0 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 0 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 5600 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 11214 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 13.5, 11214 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 27, 11214 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27, 11214 ), verbose=options.verbose )
+    print("Current PGE Rate Plan Costs")
+    myHomeSolar.AddOption( Option( 'E-TOU-D', '1.0', 0, 0, 0 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-TOU-C', '1.0', 0, 0, 0 ), verbose=options.verbose )
+    print("\nNEM 1.0 options")
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 0, 14000 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 5600, 22000 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 10000, 27000 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 11214, 29582 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 27, 11214, 29582 + 9800 ), verbose=options.verbose )
+    print("\nNEM 3.0 options")
+    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 13.5, 11214, 29582 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27, 11214, 29582 + 9800 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 40.5, 11214, 29582 + 9800 + 9800 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27, 16000, 35000 + 9800 ), verbose=options.verbose )
+
     return 0
 
 if __name__ == '__main__':
