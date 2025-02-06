@@ -188,7 +188,7 @@ class   HourlyProj:
     Used to compute hour by hour projections of grid vs solar vs battery status
     Includes usage, solar production, charging, export, excess solar, etc.
     """
-    def __init__( self, time=None, grid=0, usage=0, battery=0, charging=0, newSolar=0, oldSolar=0, newExcess=0, oldExcess=0, export=0, cost=0 ):
+    def __init__( self, time=None, grid=0, usage=0, battery=0, batteryUsed=0, charging=0, newSolar=0, oldSolar=0, newExcess=0, oldExcess=0, export=0, cost=0 ):
         # Keep these values as the input conditions
         self.TimeOfDay = datetime.datetime(year=2000,month=1,day=1) if time == None else time
         self.Usage     = usage     # kWh
@@ -198,6 +198,7 @@ class   HourlyProj:
         self.Grid      = grid      # Grid import kWh
         self.Export    = export    # Grid Export kWh
         self.Battery   = battery   # Hourly Battery charge kWh
+        self.BatteryUsed= batteryUsed # Battery used this hour kWh
         self.Charging  = charging  # Charging kWh
         self.NewExcess = newExcess # Excess New Solar kWh
         self.OldExcess = oldExcess # Excess Old Solar kWh
@@ -205,7 +206,7 @@ class   HourlyProj:
 
     def __str__( self ):
         #return f"{self.TimeOfDay}: Cost={self.Cost:>6.2f}, Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}" 
-        return f"{self.TimeOfDay}: Usage={self.Usage:>6.2f}, NewSolar={self.NewSolar:>6.2f}, OldSolar={self.OldSolar:>6.2f}, Grid={self.Grid:>6.2f}, Export={self.Export:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, NewExcess={self.NewExcess:>6.2f}, OldExcess={self.OldExcess:>6.2f}, Cost=${self.Cost:>6.2f}"
+        return f"{self.TimeOfDay}: Usage={self.Usage:>6.2f}, NewSolar={self.NewSolar:>6.2f}, OldSolar={self.OldSolar:>6.2f}, Grid={self.Grid:>6.2f}, Export={self.Export:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, BatteryUsed={self.BatteryUsed:>6.2f}, NewExcess={self.NewExcess:>6.2f}, OldExcess={self.OldExcess:>6.2f}, Cost=${self.Cost:>6.2f}"
 
     # Arithmetic operators
     def __add__( self, other ):
@@ -213,23 +214,24 @@ class   HourlyProj:
         result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
                             newExcess=self.NewExcess, oldExcess=self.OldExcess,
                             newSolar=self.NewSolar, oldSolar=self.OldSolar,
-                            export=self.Export, cost=self.Cost )
-        result.Grid     += other.Grid
-        result.Usage    += other.Usage
-        result.Charging += other.Charging
-        result.NewExcess+= other.NewExcess
-        result.OldExcess+= other.OldExcess
-        result.NewSolar += other.NewSolar
-        result.OldSolar += other.OldSolar
-        result.Export   += other.Export
-        result.Cost     += other.Cost
-        result.TimeOfDay = max( result.TimeOfDay, other.TimeOfDay )
+                            batteryUsed=self.BatteryUsed, export=self.Export, cost=self.Cost )
+        result.Grid        += other.Grid
+        result.Usage       += other.Usage
+        result.Charging    += other.Charging
+        result.NewExcess   += other.NewExcess
+        result.OldExcess   += other.OldExcess
+        result.NewSolar    += other.NewSolar
+        result.OldSolar    += other.OldSolar
+        result.Export      += other.Export
+        result.BatteryUsed += other.BatteryUsed
+        result.Cost        += other.Cost
+        result.TimeOfDay    = max( result.TimeOfDay, other.TimeOfDay )
         return result
     def __truediv__( self, other ):
         # Note: Battery and TimeOfDay do not get modified
         result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
                             newExcess=self.NewExcess, oldExcess=self.OldExcess, newSolar=self.NewSolar, oldSolar=self.OldSolar,
-                            export=self.Export, cost=self.Cost )
+                            batteryUsed=self.BatteryUsed, export=self.Export, cost=self.Cost )
         result.Grid     /= other
         result.Usage    /= other
         result.Charging /= other
@@ -238,13 +240,14 @@ class   HourlyProj:
         result.NewSolar /= other
         result.OldSolar /= other
         result.Export   /= other
+        result.BatteryUsed /= other
         result.Cost     /= other
         return result
     def __mul__( self, other ):
         # Note: Battery and TimeOfDay do not get modified
         result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
                             newExcess=self.NewExcess, oldExcess=self.OldExcess, newSolar=self.NewSolar, oldSolar=self.OldSolar,
-                            export=self.Export, cost=self.Cost )
+                            batteryUsed=self.BatteryUsed, export=self.Export, cost=self.Cost )
         result.Grid     *= other
         result.Usage    *= other
         result.Charging *= other
@@ -253,16 +256,19 @@ class   HourlyProj:
         result.NewSolar *= other
         result.OldSolar *= other
         result.Export   *= other
+        result.BatteryUsed *= other
         result.Cost     *= other
         return result
 
     def ApplyBatteryToGrid( self ):
         if self.Grid > 0 and self.Battery > 0:
             if self.Battery >= self.Grid:
-                self.Battery -= self.Grid
+                self.BatteryUsed = self.Grid
+                self.Battery -= self.BatteryUsed
                 self.Grid = 0
             else:
                 self.Grid -= self.Battery
+                self.BatteryUsed = self.Battery
                 self.Battery = 0
         if self.Grid < 0:
             print( "Error: {self}" )
@@ -315,7 +321,10 @@ class   HourlyProj:
         if self.Battery <= 0:
             return
         availExport = max( self.Battery, maxExport, options.MaxOutput )
-        self.Export = max( nonExportLimit, self.Export + availExport )
+        newExport = max( nonExportLimit, self.Export + availExport )
+        self.BatteryUsed = newExport - self.Export
+        self.Battery -= self.BatteryUsed
+        self.Export = newExport
  
     def ExportNewSolarToGrid( self ):
         availExport = min( self.NewExcess, nonExportLimit - self.Export )
@@ -482,6 +491,7 @@ class   Option:
         Grid = []
         Export = []
         Battery = []
+        batteryUsed = []
         Charging = []
         Excess = []
         Cost = []
@@ -498,7 +508,8 @@ class   Option:
             Grid.append( hourlyData.Grid )
             Export.append( hourlyData.Export )
             Battery.append( hourlyData.Battery )
-            Charging.append( hourlyData.Charging )
+            batteryUsed.append( hourlyData.BatteryUsed )
+            Charging.append( hourlyData.Charging / (self.Efficiency/100) )
             Excess.append( hourlyData.NewExcess + hourlyData.OldExcess )
             Cost.append( hourlyData.Cost )
         data = {    'TimeOfDay':    np.array(Time),
@@ -506,6 +517,7 @@ class   Option:
                     'solar':        np.array(Solar),
                     'export':       np.array(Export),
                     'battery':      np.array(Battery),
+                    'batteryUsed':  np.array(batteryUsed),
                     'charging':     np.array(Charging),
                     'excess':       np.array(Excess),
                     'cost':         np.array(Cost),
@@ -515,7 +527,7 @@ class   Option:
     def PlotDay( self, month, day ):
         data = self.GetDataForDay( month, day )
         self.axs[0].xaxis.set_major_locator(mdates.HourLocator())
-        self.axs[0].xaxis.set_major_formatter(mdates.DateFormatter('%H%p'))
+        self.axs[0].xaxis.set_major_formatter(mdates.DateFormatter('%I%p'))
         self.axs[0].set_xlabel('Time')
         self.axs[0].set_ylabel('kWh')
         self.axs[0].set_title(f"Grid Usage Solar and Battery for {month}/{day}")
@@ -523,9 +535,10 @@ class   Option:
         self.axs[0].plot( 'TimeOfDay', 'solar', data=data, color='xkcd:goldenrod', label='Solar Prod' )
         self.axs[0].bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=20), align='center', label='Grid' )
         self.axs[0].bar( 'TimeOfDay', 'solar', data=data, color='xkcd:goldenrod', width=timedelta(minutes=20), align='center', label='Solar' )
-        batteryBottom = data['solar'] - data['battery']
-        self.axs[0].bar( 'TimeOfDay', 'battery', data=data, color='xkcd:sky blue', width=timedelta(minutes=20), align='center', label='Battery', bottom=batteryBottom)
-        self.axs[0].bar( 'TimeOfDay', 'charging', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=20), align='center', label='Charging', bottom='grid' )
+        batteryBottom = data['Usage'] - data['batteryUsed']
+        self.axs[0].bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:sky blue', width=timedelta(minutes=20), align='center', label='Battery', bottom=batteryBottom)
+        #chargingBottom = data['solar'] - data['batteryUsed']
+        self.axs[0].bar( 'TimeOfDay', 'charging', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=20), align='center', label='Charging', bottom='Usage' )
         exportBottom = data['solar'] - data['export']
         self.axs[0].bar( 'TimeOfDay', 'export', data=data, color='xkcd:fire engine red', width=timedelta(minutes=20), align='center', label='Export', bottom=exportBottom)
         self.axs[0].xaxis.set_major_locator(mdates.HourLocator())
@@ -603,8 +616,8 @@ class   HomeSolar:
                     newHour.ApplyOldSolarToGrid( )
                 else:
                     # OldSolar then Battery
-                    newHour.ApplyBatteryToGrid( )
                     newHour.ApplyOldSolarToGrid( )
+                    newHour.ApplyBatteryToGrid( )
             elif isPartialPeakTime( data.TimeOfDay, option.RatePlan ):
                 #
                 # Handle PartialPeak periods
@@ -626,8 +639,9 @@ class   HomeSolar:
                 #
                 # Handle OffPeak periods
                 #
-                newHour.ApplyNewSolarToGrid( )
+                #newHour.ApplyNewSolarToGrid( )
                 newHour.ApplyOldSolarToGrid( )
+                newHour.ApplyNewSolarToGrid( )
 
                 newHour.ApplyNewSolarToBattery( option )
                 if option.NewSolarProd == 0 or option.NEM == '3.0':
