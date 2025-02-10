@@ -94,19 +94,21 @@ SelectedDay = None
 root = None
 matplotlib.use('TkAgg')
 
-def select_date(event):
+def select_date():
     def on_date_select(date):
         global SelectedDay
         SelectedDay = date
+        print( f"SelectedDay={SelectedDay:%b %d, %Y}" )
         #ax.set_xlim(date, date + datetime.timedelta(days=1))
         plt.draw()
         top.destroy()
 
     global root
-    top = Toplevel(root)
-    cal = Calendar(top, selectmode='day', date_pattern='yyyy-mm-dd')
+    top = tkinter.Toplevel(root)
+    cal = Calendar(top, selectmode='day', date_pattern='yyyy-mm-dd',
+                    year=SelectedDay.year, month=SelectedDay.month, day=SelectedDay.day)
     cal.pack()
-    Button(top, text="Select", command=lambda: on_date_select(cal.selection_get())).pack()
+    tkinter.Button(top, text="Select", command=lambda: on_date_select(cal.selection_get())).pack()
 
 def isPeakTime( timeOfDay, ratePlan ):
     if ratePlan == 'E-TOU-D':
@@ -584,7 +586,7 @@ class   Option:
         self.day_ax.set_ylabel('kWh')
  
         button_ax = plt.axes([0.8, 0.05, 0.1, 0.075])
-        button = tkinter.Button(master=root, text='Select Date', command=lambda e: select_date(event=e))
+        button = tkinter.Button(master=root, text='Select Date', command=select_date)
         #button = Button(button_ax, text='Select Date', color='xkcd:celery')
         self.canvas = FigureCanvasTkAgg(self.fig, master=root)
 
