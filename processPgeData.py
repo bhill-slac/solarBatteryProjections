@@ -100,11 +100,14 @@ def select_date():
         SelectedDay = date
         print( f"SelectedDay={SelectedDay:%b %d, %Y}" )
         #ax.set_xlim(date, date + datetime.timedelta(days=1))
-        plt.draw()
+        myHomeSolar.PlotOptions()
+        #plt.draw()
         top.destroy()
 
-    global root
-    top = tkinter.Toplevel(root)
+    #global root, myHomeSolar
+    global SelectedDay, myHomeSolar
+    top = tkinter.Toplevel(myHomeSolar)
+    #top = tkinter.Toplevel(myHomeSolar)
     cal = Calendar(top, selectmode='day', date_pattern='yyyy-mm-dd',
                     year=SelectedDay.year, month=SelectedDay.month, day=SelectedDay.day)
     cal.pack()
@@ -477,8 +480,9 @@ class   HourlyProj:
 
 #   Options for home solar projections
 #   opt1 = Option( 'E-ELEC', '1.0', 13.5, 5600 )
-class   Option:
-    def __init__( self, ratePlan, nem, maxBattery, newSolarProd, systemCost, efficiency=95 ):
+class   Option( tkinter.Toplevel ):
+    def __init__( self, parent, ratePlan, nem, maxBattery, newSolarProd, systemCost, efficiency=95 ):
+        super().__init__(parent)
         self.RatePlan     = ratePlan      # 'E-ELEC' or 'E-TOU-C' or 'E-TOU-D'
         self.NEM          = nem           # '1.0' or '3.0'
         self.MaxBattery   = maxBattery    # kWh
@@ -489,6 +493,17 @@ class   Option:
         self.PaybackYears = 0             # years
         self.TwentyFiveYearSavings = 0    # $
         self.Projections   = []
+        print( f"class Option: Created {self}" )
+        # Set title, create figure and actors 
+        plotTitle = f"RatePlan={self.RatePlan}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, NewSolarProd={self.NewSolarProd}"
+        self.title(plotTitle)
+        self.fig = plt.figure( plotTitle, figsize=(15,6) )
+        self.axs = self.fig.subplots( 1, 1 )
+        #self.day_ax = self.axs[0]
+        self.day_ax = self.axs
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self)
+        self.toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
+
     def __str__( self ):
         return f"RatePlan={self.RatePlan:>7}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, Efficiency={self.Efficiency}, NewSolarProd={self.NewSolarProd}\nSystemCost=${self.SystemCost:>6.2f}, YearlyPgeCost=${self.YearlyPgeCost:>6.2f}, PaybackYears={self.PaybackYears:>3.1f} yrs, 25YearSavings=${self.TwentyFiveYearSavings:>8.2f}" 
 
@@ -552,7 +567,10 @@ class   Option:
         return data
 
     def PlotDay( self, month, day ):
+        print( f"PlotDay: {month}/{day} for Option {self}" )
         data = self.GetDataForDay( month, day )
+        print( "yticks range=", np.arange(int(max(data['solar'])+0.9)) )
+        self.day_ax.set_yticks( np.arange(int(max(data['solar'])+0.9)) )
         self.day_ax.set_title(f"NewSolar={self.NewSolarProd}kWh, Battery={self.MaxBattery:.1f}kWh, Grid Usage Solar and Battery for {month}/{day}")
         self.day_ax.plot( 'TimeOfDay', 'Usage', data=data, color='xkcd:pale orange' )
         self.day_ax.plot( 'TimeOfDay', 'solar', data=data, color='xkcd:goldenrod', label='Solar Prod' )
@@ -570,30 +588,23 @@ class   Option:
         #self.canvas.draw()
 
     def PlotOption( self ):
-        global SelectedDay, root
-        self.plotWindow = tkinter.Toplevel(root)
-        plotTitle = f"RatePlan={self.RatePlan}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, NewSolarProd={self.NewSolarProd}"
-        self.plotWindow.title(plotTitle)
-        self.fig = plt.figure( plotTitle, figsize=(15,6) )
-        self.axs = self.fig.subplots( 1, 1 )
-        #self.day_ax = self.axs[0]
-        self.day_ax = self.axs
-        plt.style.use('bmh')
+        global SelectedDay, root, myHomeSolar
+        print( f"PlotOption: {self}" )
+        #self.fig.clf()
+        self.day_ax.cla()
+        #self.plotWindow = tkinter.Toplevel(root)
         self.day_ax.xaxis.set_major_locator(mdates.HourLocator())
         self.day_ax.xaxis.set_major_formatter(mdates.DateFormatter('%I%p'))
         #self.day_ax.set_xticks(rotation=45)
         self.day_ax.set_xlabel('Time')
         self.day_ax.set_ylabel('kWh')
  
-        button_ax = plt.axes([0.8, 0.05, 0.1, 0.075])
-        button = tkinter.Button(master=root, text='Select Date', command=select_date)
+        #button_ax = plt.axes([0.8, 0.05, 0.1, 0.075])
+        #button = tkinter.Button(master=root, text='Select Date', command=select_date)
         #button = Button(button_ax, text='Select Date', color='xkcd:celery')
-        self.canvas = FigureCanvasTkAgg(self.fig, master=root)
-
-        toolbar = NavigationToolbar2Tk(self.canvas, root, pack_toolbar=False)
-        toolbar.update()
-        button.pack()
-        toolbar.pack(side=tkinter.BOTTOM, fill=tkinter.X)
+        self.toolbar.update()
+        #button.pack()
+        self.toolbar.pack(side=tkinter.BOTTOM, fill=tkinter.X)
         self.canvas.get_tk_widget().pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=True)
 
         # Plot data for selected day
@@ -617,12 +628,22 @@ def DebugThisDay( timeOfDay, year, month, day ):
         return True
     return False
 
-class   HomeSolar:
+class   HomeSolar(tkinter.Tk):
     def __init__( self ):
+        super().__init__()
+        self.title('Main Window')
         self.hourlyData = []
         self.options = []
+        plt.style.use('bmh')
+        self.geometry( '300x200' )
+ 
+        #button_ax = plt.axes([0.8, 0.05, 0.1, 0.075])
+        button = tkinter.Button(master=self, text='Select Date', command=select_date)
+        button.pack()
+        #button = Button(button_ax, text='Select Date', color='xkcd:celery')
 
     def PlotOptions( self ):
+        #plt.clf()
         for option in self.options:
             option.PlotOption()
 
@@ -635,7 +656,9 @@ class   HomeSolar:
         option.Projections.append( HourlyProj( time=self.hourlyData[0].TimeOfDay, battery=battery ) )
         diagTotals = HourlyProj()
         diagDay  = HourlyProj()
-        SelectedDay = datetime.datetime( year=self.hourlyData[0].TimeOfDay.year, month=1, day=1 )
+        SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year,
+                                            month=self.hourlyData[0].TimeOfDay.month,
+                                            day=self.hourlyData[0].TimeOfDay.day )
         #self.hourlyProj = []
         priorDay = 0
         dailyTotal = 0
@@ -929,6 +952,9 @@ def process_options(argv):
     options = parser.parse_args()
     return options
 
+# Create myHomeSolar
+myHomeSolar = None
+
 def main(argv=None):
     options = process_options(argv)
 
@@ -956,29 +982,30 @@ def main(argv=None):
         print( 'From %s to %s' % ( min(vueData.keys()).strftime('%m/%d/%Y, %H:%M'),
                                    max(vueData.keys()).strftime('%m/%d/%Y, %H:%M') ) )
 
+    global myHomeSolar
     myHomeSolar = HomeSolar()
     myHomeSolar.ProcessDataFiles( pgeData, vueData, options.verbose )
 
     print("Current PGE Rate Plan Costs")
-    #myHomeSolar.AddOption( Option( 'E-TOU-D', '1.0', 0, 0, 0 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( 'E-TOU-C', '1.0', 0, 0, 0 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-TOU-D', '1.0', 0, 0, 0 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-TOU-C', '1.0', 0, 0, 0 ), verbose=options.verbose )
     print("\nNEM 1.0 options")
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 0, 14000 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 5600, 22000 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 10000, 27500 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 11214, 29582 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 14225, 52426*0.70), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 27.0, 14636, 65426*0.70), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 0, 14000 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 5600, 22000 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 10000, 27500 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 11214, 29582 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 14225, 52426*0.70), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 14636, 65426*0.70), verbose=options.verbose )
     #print("\nNEM 3.0 options")
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 13.5, 11214, 29582 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 40.5, 11214, 29582 + 9800 + 9800 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27.0, 16000, 35000 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 13.5, 11214, 29582 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 40.5, 11214, 29582 + 9800 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 16000, 35000 + 9800 ), verbose=options.verbose )
 
     # Get handle for Tkinter root window and hide it
-    global root
-    root = tkinter.Tk()
+    #global root
+    #root = tkinter.Tk()
     #root.withdraw()
 
     # Plot each option
@@ -987,8 +1014,8 @@ def main(argv=None):
     #fig = plt.figure( "Solar and Battery Analysis", figsize=(14,40) )
     #ax = plt.subplot( 1, 2, 1 )
 
-    plt.show()
-    root.mainloop()
+    #plt.show()
+    myHomeSolar.mainloop()
     #print( "Starting IPython shell..." )
     #IPython.embed()
     return 0
