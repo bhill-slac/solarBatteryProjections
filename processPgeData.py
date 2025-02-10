@@ -94,6 +94,30 @@ SelectedDay = None
 root = None
 matplotlib.use('TkAgg')
 
+def select_nextDay():
+    global SelectedDay, myHomeSolar
+    SelectedDay = SelectedDay + datetime.timedelta(days=1)
+    myHomeSolar.PlotOptions()
+
+def select_prevDay():
+    global SelectedDay, myHomeSolar
+    SelectedDay = SelectedDay - datetime.timedelta(days=1)
+    myHomeSolar.PlotOptions()
+
+def select_nextMonth():
+    global SelectedDay, myHomeSolar
+    SelectedDay = datetime.datetime( year=SelectedDay.year,
+                                     month=min(12,SelectedDay.month + 1),
+                                     day=SelectedDay.day )
+    myHomeSolar.PlotOptions()
+
+def select_prevMonth():
+    global SelectedDay, myHomeSolar
+    SelectedDay = datetime.datetime( year=SelectedDay.year,
+                                     month=max(1,SelectedDay.month - 1),
+                                     day=SelectedDay.day )
+    myHomeSolar.PlotOptions()
+
 def select_date():
     def on_date_select(date):
         global SelectedDay
@@ -493,16 +517,28 @@ class   Option( tkinter.Toplevel ):
         self.PaybackYears = 0             # years
         self.TwentyFiveYearSavings = 0    # $
         self.Projections   = []
-        print( f"class Option: Created {self}" )
+        #print( f"class Option: Created {self}" )
         # Set title, create figure and actors 
         plotTitle = f"RatePlan={self.RatePlan}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, NewSolarProd={self.NewSolarProd}"
         self.title(plotTitle)
-        self.fig = plt.figure( plotTitle, figsize=(15,6) )
+        self.YearlyDataFrame = tkinter.Frame(self, height=40)
+        self.DailyGraphFrame = tkinter.Frame(self, height=120)
+        self.DailyDataFrame = tkinter.Frame(self, height=40)
+        self.fig = plt.figure( plotTitle, figsize=(12,4) )
         self.axs = self.fig.subplots( 1, 1 )
         #self.day_ax = self.axs[0]
         self.day_ax = self.axs
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self)
-        self.toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.DailyGraphFrame)
+        #self.toolbar = NavigationToolbar2Tk(self.canvas, self.DailyGraphFrame, pack_toolbar=False)
+        self.bold16Font = tkinter.font.Font(self, size=16, weight=tkinter.font.BOLD)
+        self.l1 = tkinter.Label(self.DailyDataFrame, text=f"Today's Cost=", font=self.bold16Font)
+        self.l2 = tkinter.Label(self.DailyDataFrame, text=f"Today's Usage=", font=self.bold16Font)
+        self.l3 = tkinter.Label(self.DailyDataFrame, text=f"Today's Solar=", font=self.bold16Font)
+        self.l4 = tkinter.Label(self.DailyDataFrame, text=f"Today's Grid Import=", font=self.bold16Font)
+        self.l5 = tkinter.Label(self.DailyDataFrame, text=f"Today's Grid Export=", font=self.bold16Font)
+        self.YearlyDataFrame.grid(row=0)
+        self.DailyGraphFrame.grid(row=1)
+        self.DailyDataFrame.grid(row=2)
 
     def __str__( self ):
         return f"RatePlan={self.RatePlan:>7}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, Efficiency={self.Efficiency}, NewSolarProd={self.NewSolarProd}\nSystemCost=${self.SystemCost:>6.2f}, YearlyPgeCost=${self.YearlyPgeCost:>6.2f}, PaybackYears={self.PaybackYears:>3.1f} yrs, 25YearSavings=${self.TwentyFiveYearSavings:>8.2f}" 
@@ -525,6 +561,10 @@ class   Option( tkinter.Toplevel ):
         self.TwentyFiveYearSavings = totalSavings
         #print( f"Est Yearly PGE cost in 25 years={estFutureCostAsIs:$>6.2f}" )
         #print( f"Est Yearly Option cost in 25 years={estFutureCostOfOption:$>6.2f}" )
+        tkinter.Label(self.YearlyDataFrame, text=f"SystemCost=${self.SystemCost:>6.2f}", font=self.bold16Font ).grid( row=1, column=0 )
+        tkinter.Label(self.YearlyDataFrame, text=f"YearlyPgeCost=${self.YearlyPgeCost:>6.2f}", font=self.bold16Font ).grid( row=1, column=1 )
+        tkinter.Label(self.YearlyDataFrame, text=f"PaybackYears={self.PaybackYears:>3.1f} yrs", font=self.bold16Font ).grid( row=1, column=2 )
+        tkinter.Label(self.YearlyDataFrame, text=f"25YearSavings=${self.TwentyFiveYearSavings:>8.2f}", font=self.bold16Font ).grid( row=1, column=3 )
 
     def GetDataForDay( self, month, day ):
         Time = []
@@ -567,45 +607,62 @@ class   Option( tkinter.Toplevel ):
         return data
 
     def PlotDay( self, month, day ):
-        print( f"PlotDay: {month}/{day} for Option {self}" )
+        #print( f"PlotDay: {month}/{day} for Option {self}" )
         data = self.GetDataForDay( month, day )
-        print( "yticks range=", np.arange(int(max(data['solar'])+0.9)) )
-        self.day_ax.set_yticks( np.arange(int(max(data['solar'])+0.9)) )
-        self.day_ax.set_title(f"NewSolar={self.NewSolarProd}kWh, Battery={self.MaxBattery:.1f}kWh, Grid Usage Solar and Battery for {month}/{day}")
+        self.day_ax.set_yticks( np.arange(int(max(max(data['solar']),max(data['Usage']))+0.99999)+1) )
+        #print( "max solar=", max(data['solar']) )
+        #print( "int max solar=", int(max(data['solar'])+0.9) )
+        #print( "yticks range=", np.arange(int(max(data['solar'])+0.9)) )
+        self.day_ax.set_title(f"NewSolar={self.NewSolarProd}kWh, Battery={self.MaxBattery:.1f}kWh, Grid Usage Solar and Battery for {month}/{day}",
+                            fontsize=16, fontweight='bold' )
         self.day_ax.plot( 'TimeOfDay', 'Usage', data=data, color='xkcd:pale orange' )
-        self.day_ax.plot( 'TimeOfDay', 'solar', data=data, color='xkcd:goldenrod', label='Solar Prod' )
-        gridBottom = 'solar' + 'batteryUsed'
-        self.day_ax.bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=20), align='center', label='Grid', bottom=gridBottom )
-        self.day_ax.bar( 'TimeOfDay', 'solar', data=data, color='xkcd:goldenrod', width=timedelta(minutes=20), align='center', label='Solar' )
+        self.day_ax.plot( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', label='Solar Prod' )
+        gridBottom = data['solar'] + data['batteryUsed']
+        #print( "solar=", data['solar'] )
+        #print( "batteryUsed=", data['batteryUsed'] )
+        #print( "gridBottom=", gridBottom )
+        #print( "grid=", data['grid'] )
+        self.day_ax.bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=24), align='center', label='Grid', bottom=gridBottom )
+        self.day_ax.bar( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', width=timedelta(minutes=24), align='center', label='Solar' )
         #batteryBottom = data['Usage'] - data['batteryUsed']
-        batteryBottom = 'solar'
-        self.day_ax.bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:sky blue', width=timedelta(minutes=20), align='edge', label='Battery', bottom=batteryBottom)
+        batteryBottom = data['solar'] - data['export']
+        self.day_ax.bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=24), align='center', label='Battery', bottom=batteryBottom)
         #chargingBottom = data['solar'] - data['batteryUsed']
-        self.day_ax.bar( 'TimeOfDay', 'charging', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=20), align='center', label='Charging', bottom='Usage' )
+        self.day_ax.bar( 'TimeOfDay', 'charging', data=data, color='xkcd:sky blue', width=timedelta(minutes=24), align='center', label='Charging', bottom='Usage' )
         exportBottom = data['solar'] - data['export']
-        self.day_ax.bar( 'TimeOfDay', 'export', data=data, color='xkcd:fire engine red', width=timedelta(minutes=10), align='center', label='Export', bottom=exportBottom)
-        self.day_ax.legend(loc='upper right')
+        self.day_ax.bar( 'TimeOfDay', 'export', data=data, color='xkcd:fire engine red', width=timedelta(minutes=14), align='center', label='Export', bottom=exportBottom)
+        self.day_ax.legend(loc='upper left')
+        self.l1.config( text=f"Today's Cost=${sum(data['cost']):>6.2f}" )
+        self.l2.config( text=f"Today's Usage={sum(data['Usage']):>2.1f}kWh" )
+        self.l3.config( text=f"Today's Solar={sum(data['solar']):>2.1f}kWh" )
+        self.l4.config( text=f"Today's Grid Import={sum(data['grid']):>2.1f}kWh" )
+        self.l5.config( text=f"Today's Grid Export={sum(data['export']):>2.1f}kWh" )
+        self.l1.grid( row=2, column=0 )
+        self.l2.grid( row=2, column=1 )
+        self.l3.grid( row=2, column=2 )
+        self.l4.grid( row=2, column=3 )
+        self.l5.grid( row=2, column=4 )
+
         #self.canvas.draw()
 
     def PlotOption( self ):
         global SelectedDay, root, myHomeSolar
-        print( f"PlotOption: {self}" )
+        #print( f"PlotOption: {self}" )
         #self.fig.clf()
         self.day_ax.cla()
         #self.plotWindow = tkinter.Toplevel(root)
         self.day_ax.xaxis.set_major_locator(mdates.HourLocator())
         self.day_ax.xaxis.set_major_formatter(mdates.DateFormatter('%I%p'))
+        plt.setp( self.day_ax.xaxis.get_majorticklabels(), rotation=45 )
         #self.day_ax.set_xticks(rotation=45)
         self.day_ax.set_xlabel('Time')
         self.day_ax.set_ylabel('kWh')
  
-        #button_ax = plt.axes([0.8, 0.05, 0.1, 0.075])
-        #button = tkinter.Button(master=root, text='Select Date', command=select_date)
-        #button = Button(button_ax, text='Select Date', color='xkcd:celery')
-        self.toolbar.update()
-        #button.pack()
-        self.toolbar.pack(side=tkinter.BOTTOM, fill=tkinter.X)
-        self.canvas.get_tk_widget().pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=True)
+        #self.toolbar.update()
+        #self.toolbar.grid(row=0)
+        w1 = self.canvas.get_tk_widget()
+        #w1.grid(row=0)
+        w1.pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=True)
 
         # Plot data for selected day
         self.PlotDay( SelectedDay.month, SelectedDay.day )
@@ -638,8 +695,16 @@ class   HomeSolar(tkinter.Tk):
         self.geometry( '300x200' )
  
         #button_ax = plt.axes([0.8, 0.05, 0.1, 0.075])
-        button = tkinter.Button(master=self, text='Select Date', command=select_date)
-        button.pack()
+        selectButton    = tkinter.Button(master=self, text='Select Date', command=select_date)
+        nextDayButton   = tkinter.Button(master=self, text='Next Day',    command=select_nextDay)
+        prevDayButton   = tkinter.Button(master=self, text='Prev Day',    command=select_prevDay)
+        nextMonthButton = tkinter.Button(master=self, text='Next Month',  command=select_nextMonth)
+        prevMonthButton = tkinter.Button(master=self, text='Prev Month',  command=select_prevMonth)
+        selectButton.grid(  row=1, column=1 )
+        prevDayButton.grid( row=2, column=1 )
+        nextDayButton.grid( row=2, column=2 )
+        prevMonthButton.grid( row=3, column=1 )
+        nextMonthButton.grid( row=3, column=2 )
         #button = Button(button_ax, text='Select Date', color='xkcd:celery')
 
     def PlotOptions( self ):
@@ -659,6 +724,10 @@ class   HomeSolar(tkinter.Tk):
         SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year,
                                             month=self.hourlyData[0].TimeOfDay.month,
                                             day=self.hourlyData[0].TimeOfDay.day )
+        # Nov 25 was a very low solar day
+        SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=11, day=25 )
+        # Aug 9  was a very high solar day with very very high peak usage
+        SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=8, day=9 )
         #self.hourlyProj = []
         priorDay = 0
         dailyTotal = 0
