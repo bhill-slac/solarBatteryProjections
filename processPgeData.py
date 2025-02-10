@@ -8,8 +8,15 @@ import dateutil
 from datetime import timedelta
 import IPython
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+#from tkinter import Tk, Button, Toplevel, Label
+#from tkinter import *
+import tkinter
+from tkcalendar import Calendar
+from matplotlib.backend_bases import key_press_handler
+from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg, NavigationToolbar2Tk)
 
 # Note: Look for PGE usage on day I shutoff our solar for the day.
 # Should be around Dec 23, 2009
@@ -82,6 +89,24 @@ RatePlans = {
             }
         }
     }
+
+SelectedDay = None
+root = None
+matplotlib.use('TkAgg')
+
+def select_date(event):
+    def on_date_select(date):
+        global SelectedDay
+        SelectedDay = date
+        #ax.set_xlim(date, date + datetime.timedelta(days=1))
+        plt.draw()
+        top.destroy()
+
+    global root
+    top = Toplevel(root)
+    cal = Calendar(top, selectmode='day', date_pattern='yyyy-mm-dd')
+    cal.pack()
+    Button(top, text="Select", command=lambda: on_date_select(cal.selection_get())).pack()
 
 def isPeakTime( timeOfDay, ratePlan ):
     if ratePlan == 'E-TOU-D':
@@ -526,30 +551,53 @@ class   Option:
 
     def PlotDay( self, month, day ):
         data = self.GetDataForDay( month, day )
-        self.axs[0].xaxis.set_major_locator(mdates.HourLocator())
-        self.axs[0].xaxis.set_major_formatter(mdates.DateFormatter('%I%p'))
-        self.axs[0].set_xlabel('Time')
-        self.axs[0].set_ylabel('kWh')
-        self.axs[0].set_title(f"Grid Usage Solar and Battery for {month}/{day}")
-        self.axs[0].plot( 'TimeOfDay', 'Usage', data=data, color='xkcd:pale orange' )
-        self.axs[0].plot( 'TimeOfDay', 'solar', data=data, color='xkcd:goldenrod', label='Solar Prod' )
-        self.axs[0].bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=20), align='center', label='Grid' )
-        self.axs[0].bar( 'TimeOfDay', 'solar', data=data, color='xkcd:goldenrod', width=timedelta(minutes=20), align='center', label='Solar' )
-        batteryBottom = data['Usage'] - data['batteryUsed']
-        self.axs[0].bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:sky blue', width=timedelta(minutes=20), align='center', label='Battery', bottom=batteryBottom)
+        self.day_ax.set_title(f"NewSolar={self.NewSolarProd}kWh, Battery={self.MaxBattery:.1f}kWh, Grid Usage Solar and Battery for {month}/{day}")
+        self.day_ax.plot( 'TimeOfDay', 'Usage', data=data, color='xkcd:pale orange' )
+        self.day_ax.plot( 'TimeOfDay', 'solar', data=data, color='xkcd:goldenrod', label='Solar Prod' )
+        gridBottom = 'solar' + 'batteryUsed'
+        self.day_ax.bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=20), align='center', label='Grid', bottom=gridBottom )
+        self.day_ax.bar( 'TimeOfDay', 'solar', data=data, color='xkcd:goldenrod', width=timedelta(minutes=20), align='center', label='Solar' )
+        #batteryBottom = data['Usage'] - data['batteryUsed']
+        batteryBottom = 'solar'
+        self.day_ax.bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:sky blue', width=timedelta(minutes=20), align='edge', label='Battery', bottom=batteryBottom)
         #chargingBottom = data['solar'] - data['batteryUsed']
-        self.axs[0].bar( 'TimeOfDay', 'charging', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=20), align='center', label='Charging', bottom='Usage' )
+        self.day_ax.bar( 'TimeOfDay', 'charging', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=20), align='center', label='Charging', bottom='Usage' )
         exportBottom = data['solar'] - data['export']
-        self.axs[0].bar( 'TimeOfDay', 'export', data=data, color='xkcd:fire engine red', width=timedelta(minutes=20), align='center', label='Export', bottom=exportBottom)
-        self.axs[0].xaxis.set_major_locator(mdates.HourLocator())
-        self.axs[0].legend(loc='upper right')
+        self.day_ax.bar( 'TimeOfDay', 'export', data=data, color='xkcd:fire engine red', width=timedelta(minutes=10), align='center', label='Export', bottom=exportBottom)
+        self.day_ax.legend(loc='upper right')
+        #self.canvas.draw()
 
     def PlotOption( self ):
-        self.fig = plt.figure( f"RatePlan={self.RatePlan}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, NewSolarProd={self.NewSolarProd}", figsize=(22,6) )
-        self.axs = self.fig.subplots( 2, 1 )
+        global SelectedDay, root
+        self.plotWindow = tkinter.Toplevel(root)
+        plotTitle = f"RatePlan={self.RatePlan}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, NewSolarProd={self.NewSolarProd}"
+        self.plotWindow.title(plotTitle)
+        self.fig = plt.figure( plotTitle, figsize=(15,6) )
+        self.axs = self.fig.subplots( 1, 1 )
+        #self.day_ax = self.axs[0]
+        self.day_ax = self.axs
         plt.style.use('bmh')
-        self.SelectedDay = datetime.datetime( year=self.Projections[0].TimeOfDay.year, month=1, day=2 )
-        self.PlotDay( self.SelectedDay.month, self.SelectedDay.day )
+        self.day_ax.xaxis.set_major_locator(mdates.HourLocator())
+        self.day_ax.xaxis.set_major_formatter(mdates.DateFormatter('%I%p'))
+        #self.day_ax.set_xticks(rotation=45)
+        self.day_ax.set_xlabel('Time')
+        self.day_ax.set_ylabel('kWh')
+ 
+        button_ax = plt.axes([0.8, 0.05, 0.1, 0.075])
+        button = tkinter.Button(master=root, text='Select Date', command=lambda e: select_date(event=e))
+        #button = Button(button_ax, text='Select Date', color='xkcd:celery')
+        self.canvas = FigureCanvasTkAgg(self.fig, master=root)
+
+        toolbar = NavigationToolbar2Tk(self.canvas, root, pack_toolbar=False)
+        toolbar.update()
+        button.pack()
+        toolbar.pack(side=tkinter.BOTTOM, fill=tkinter.X)
+        self.canvas.get_tk_widget().pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=True)
+
+        # Plot data for selected day
+        self.PlotDay( SelectedDay.month, SelectedDay.day )
+        #self.plotWindow.grab_set()
+        self.canvas.draw()
 
 def DebugPeakVsOffPeakTimes( timeOfDay ):
     debugWinter2Summer = datetime.datetime( year=timeOfDay.year, month=6, day = 1 )
@@ -577,6 +625,7 @@ class   HomeSolar:
             option.PlotOption()
 
     def AddOption( self, option, verbose=False ):
+        global SelectedDay
         self.options.append( option )
         if verbose:
             print( f'\nAdding option: {option}' )
@@ -584,6 +633,7 @@ class   HomeSolar:
         option.Projections.append( HourlyProj( time=self.hourlyData[0].TimeOfDay, battery=battery ) )
         diagTotals = HourlyProj()
         diagDay  = HourlyProj()
+        SelectedDay = datetime.datetime( year=self.hourlyData[0].TimeOfDay.year, month=1, day=1 )
         #self.hourlyProj = []
         priorDay = 0
         dailyTotal = 0
@@ -599,7 +649,7 @@ class   HomeSolar:
                     print( f"DiagDay:\n{diagDay}" )
                 diagDay = HourlyProj(time=data.TimeOfDay)
             #verboseDay = False # DebugPeakVsOffPeakTimes(data.TimeOfDay)
-            verboseDay = DebugThisDay( data.TimeOfDay, data.TimeOfDay.year, 1, 2 )
+            verboseDay = DebugThisDay( data.TimeOfDay, SelectedDay.year, SelectedDay.month, SelectedDay.day )
 
             newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, usage=data.Usage, battery=battery,
                                 oldExcess=oldSolar, newExcess=newSolar, oldSolar=oldSolar, newSolar=newSolar )
@@ -916,18 +966,27 @@ def main(argv=None):
     myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 10000, 27500 ), verbose=options.verbose )
     myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 11214, 29582 ), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 13.5, 14225, 52426*0.70), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( 'E-ELEC', '1.0', 27.0, 14636, 65426*0.70), verbose=options.verbose )
     #print("\nNEM 3.0 options")
     #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 13.5, 11214, 29582 ), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 40.5, 11214, 29582 + 9800 + 9800 ), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( 'E-ELEC', '3.0', 27.0, 16000, 35000 + 9800 ), verbose=options.verbose )
 
+    # Get handle for Tkinter root window and hide it
+    global root
+    root = tkinter.Tk()
+    #root.withdraw()
+
+    # Plot each option
     myHomeSolar.PlotOptions()
 
     #fig = plt.figure( "Solar and Battery Analysis", figsize=(14,40) )
     #ax = plt.subplot( 1, 2, 1 )
 
     plt.show()
+    root.mainloop()
     #print( "Starting IPython shell..." )
     #IPython.embed()
     return 0
