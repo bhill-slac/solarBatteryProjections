@@ -26,6 +26,7 @@ estYearlyPgeEscalation  = 0.06      # %
 est2024PgeCost          = 5763.54   # Based on 2024 solar and usage using latest PGE E-TOU-D rate plan numbers
 oldSolarYearlyProd      = 5732      # Based on 2024 solar production measured by our Emporia VUE system
 nonExportLimit          = 5.0       # Based on rating of SMA 5000 Inverter used for NEM 1.0 application
+maxChargeRate           = 5.0       # Tesla Powerwall 3 has 5kW charge rate.  Franklin aPower is 8kW.
 
 # Minumum daily PGE charge if we don't use at least accrue at least that much in grid import charges
 pgeMinDailyDeliveryCharge = 0.39167 # Dollars, approx $12 per month
@@ -242,7 +243,7 @@ class   HourlyProj:
     Used to compute hour by hour projections of grid vs solar vs battery status
     Includes usage, solar production, charging, export, excess solar, etc.
     """
-    def __init__( self, time=None, grid=0, usage=0, battery=0, batteryUsed=0, charging=0, newSolar=0, oldSolar=0, newExcess=0, oldExcess=0, export=0, cost=0 ):
+    def __init__( self, time=None, grid=0, usage=0, battery=0, batteryUsed=0, charging=0, gridCharging=0, newSolar=0, oldSolar=0, newExcess=0, oldExcess=0, export=0, cost=0 ):
         # Keep these values as the input conditions
         self.TimeOfDay = datetime.datetime(year=2000,month=1,day=1) if time == None else time
         self.Usage     = usage     # kWh
@@ -254,24 +255,26 @@ class   HourlyProj:
         self.Battery   = battery   # Hourly Battery charge kWh
         self.BatteryUsed= batteryUsed # Battery used this hour kWh
         self.Charging  = charging  # Charging kWh
+        self.GridCharging = gridCharging  # Grid Charging kWh
         self.NewExcess = newExcess # Excess New Solar kWh
         self.OldExcess = oldExcess # Excess Old Solar kWh
         self.Cost      = cost      # $
 
     def __str__( self ):
-        #return f"{self.TimeOfDay}: Cost={self.Cost:>6.2f}, Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}" 
-        return f"{self.TimeOfDay}: Usage={self.Usage:>6.2f}, NewSolar={self.NewSolar:>6.2f}, OldSolar={self.OldSolar:>6.2f}, Grid={self.Grid:>6.2f}, Export={self.Export:>6.2f}, Charging={self.Charging:>6.2f}, Battery={self.Battery:>6.2f}, BatteryUsed={self.BatteryUsed:>6.2f}, NewExcess={self.NewExcess:>6.2f}, OldExcess={self.OldExcess:>6.2f}, Cost=${self.Cost:>6.2f}"
+        #return f"{self.TimeOfDay}: Cost={self.Cost:>6.2f}, Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, GridCharging={self.GridCharging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}" 
+        return f"{self.TimeOfDay}: Usage={self.Usage:>6.2f}, NewSolar={self.NewSolar:>6.2f}, OldSolar={self.OldSolar:>6.2f}, Grid={self.Grid:>6.2f}, Export={self.Export:>6.2f}, Charging={self.Charging:>6.2f}, GridCharging={self.GridCharging:>6.2f}, Battery={self.Battery:>6.2f}, BatteryUsed={self.BatteryUsed:>6.2f}, NewExcess={self.NewExcess:>6.2f}, OldExcess={self.OldExcess:>6.2f}, Cost=${self.Cost:>6.2f}"
 
     # Arithmetic operators
     def __add__( self, other ):
         # Note: Battery does not get added
-        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
+        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging, gridCharging=self.GridCharging,
                             newExcess=self.NewExcess, oldExcess=self.OldExcess,
                             newSolar=self.NewSolar, oldSolar=self.OldSolar,
                             batteryUsed=self.BatteryUsed, export=self.Export, cost=self.Cost )
         result.Grid        += other.Grid
         result.Usage       += other.Usage
         result.Charging    += other.Charging
+        result.GridCharging+= other.GridCharging
         result.NewExcess   += other.NewExcess
         result.OldExcess   += other.OldExcess
         result.NewSolar    += other.NewSolar
@@ -283,12 +286,13 @@ class   HourlyProj:
         return result
     def __truediv__( self, other ):
         # Note: Battery and TimeOfDay do not get modified
-        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
+        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging, gridCharging=self.GridCharging,
                             newExcess=self.NewExcess, oldExcess=self.OldExcess, newSolar=self.NewSolar, oldSolar=self.OldSolar,
                             batteryUsed=self.BatteryUsed, export=self.Export, cost=self.Cost )
         result.Grid     /= other
         result.Usage    /= other
         result.Charging /= other
+        result.GridCharging /= other
         result.NewExcess/= other
         result.OldExcess/= other
         result.NewSolar /= other
@@ -299,12 +303,13 @@ class   HourlyProj:
         return result
     def __mul__( self, other ):
         # Note: Battery and TimeOfDay do not get modified
-        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging,
+        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging, gridCharging=self.GridCharging,
                             newExcess=self.NewExcess, oldExcess=self.OldExcess, newSolar=self.NewSolar, oldSolar=self.OldSolar,
                             batteryUsed=self.BatteryUsed, export=self.Export, cost=self.Cost )
         result.Grid     *= other
         result.Usage    *= other
         result.Charging *= other
+        result.GridCharging *= other
         result.NewExcess*= other
         result.OldExcess*= other
         result.NewSolar *= other
@@ -327,13 +332,24 @@ class   HourlyProj:
         if self.Grid < 0:
             print( "Error: {self}" )
  
+    def ApplyGridToBattery( self, desiredCharge, options ):
+        if self.Battery >= options.MaxBattery:
+            return
+        availCharge = max(0, maxChargeRate - self.Charging)     # options.maxChargeRate - self.Charging
+        newCharge = min( availCharge, options.MaxBattery - self.Battery )
+        self.Battery = min( self.Battery + newCharge, options.MaxBattery )
+        self.GridCharging += newCharge
+        self.Grid += newCharge / (options.Efficiency/100)
+        if self.Grid < 0:
+            print( f"ApplyGridToBattery Error: Negative grid usage must be applied as Export!\n{self}" )
+ 
     def ApplyNewSolarToBattery( self, options ):
         if self.NewExcess <= 0:
             return
         if self.Battery >= options.MaxBattery:
             return
         availCharge = self.NewExcess * options.Efficiency / 100
-        newCharge = min( availCharge, options.MaxBattery - self.Battery )
+        newCharge = min( maxChargeRate, availCharge, options.MaxBattery - self.Battery )
         self.Battery = min( self.Battery + newCharge, options.MaxBattery )
         self.Charging += newCharge
         self.NewExcess = max( 0, self.NewExcess - newCharge / (options.Efficiency/100) )
@@ -344,7 +360,7 @@ class   HourlyProj:
         if self.Battery >= options.MaxBattery:
             return
         availCharge = self.OldExcess * options.Efficiency / 100
-        newCharge = min( availCharge, options.MaxBattery - self.Battery )
+        newCharge = min( maxChargeRate, availCharge, options.MaxBattery - self.Battery )
         self.Battery = min( self.Battery + newCharge, options.MaxBattery )
         self.Charging += newCharge
         self.OldExcess = max( 0, self.OldExcess - newCharge / (options.Efficiency/100) )
@@ -398,7 +414,7 @@ class   HourlyProj:
             print( "Error: Rate Plan %s not supported!" % ratePlan )
             return 0
         if self.Grid < 0:
-            print( "Error: Negative grid usage must be applied as Export!" )
+            print( f"DetermineCost Error: Negative grid usage must be applied as Export!\n{self}" )
             return 0
         kWh = self.Grid
         if ratePlan == "E-TOU-C":
@@ -524,18 +540,20 @@ class   Option( tkinter.Toplevel ):
         self.YearlyDataFrame = tkinter.Frame(self, height=40)
         self.DailyGraphFrame = tkinter.Frame(self, height=120)
         self.DailyDataFrame = tkinter.Frame(self, height=40)
-        self.fig = plt.figure( plotTitle, figsize=(12,4) )
-        self.axs = self.fig.subplots( 1, 1 )
+        #self.fig = plt.figure( plotTitle, figsize=(12,4) )
+        #self.axs = self.fig.subplots( 1, 1 )
         #self.day_ax = self.axs[0]
-        self.day_ax = self.axs
+        #self.day_ax = self.axs
+        self.fig = plt.figure( plotTitle, figsize=(12,4) )
+        self.day_ax = self.fig.add_subplot()
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.DailyGraphFrame)
         #self.toolbar = NavigationToolbar2Tk(self.canvas, self.DailyGraphFrame, pack_toolbar=False)
-        self.bold16Font = tkinter.font.Font(self, size=16, weight=tkinter.font.BOLD)
-        self.l1 = tkinter.Label(self.DailyDataFrame, text=f"Today's Cost=", font=self.bold16Font)
-        self.l2 = tkinter.Label(self.DailyDataFrame, text=f"Today's Usage=", font=self.bold16Font)
-        self.l3 = tkinter.Label(self.DailyDataFrame, text=f"Today's Solar=", font=self.bold16Font)
-        self.l4 = tkinter.Label(self.DailyDataFrame, text=f"Today's Grid Import=", font=self.bold16Font)
-        self.l5 = tkinter.Label(self.DailyDataFrame, text=f"Today's Grid Export=", font=self.bold16Font)
+        self.bold14Font = tkinter.font.Font(self, size=14, weight=tkinter.font.BOLD)
+        self.l1 = tkinter.Label(self.DailyDataFrame, text=f"Today's Cost=", font=self.bold14Font)
+        self.l2 = tkinter.Label(self.DailyDataFrame, text=f"Today's Usage=", font=self.bold14Font)
+        self.l3 = tkinter.Label(self.DailyDataFrame, text=f"Today's Solar=", font=self.bold14Font)
+        self.l4 = tkinter.Label(self.DailyDataFrame, text=f"Today's Grid Import=", font=self.bold14Font)
+        self.l5 = tkinter.Label(self.DailyDataFrame, text=f"Today's Grid Export=", font=self.bold14Font)
         self.YearlyDataFrame.grid(row=0)
         self.DailyGraphFrame.grid(row=1)
         self.DailyDataFrame.grid(row=2)
@@ -561,10 +579,10 @@ class   Option( tkinter.Toplevel ):
         self.TwentyFiveYearSavings = totalSavings
         #print( f"Est Yearly PGE cost in 25 years={estFutureCostAsIs:$>6.2f}" )
         #print( f"Est Yearly Option cost in 25 years={estFutureCostOfOption:$>6.2f}" )
-        tkinter.Label(self.YearlyDataFrame, text=f"SystemCost=${self.SystemCost:>6.2f}", font=self.bold16Font ).grid( row=1, column=0 )
-        tkinter.Label(self.YearlyDataFrame, text=f"YearlyPgeCost=${self.YearlyPgeCost:>6.2f}", font=self.bold16Font ).grid( row=1, column=1 )
-        tkinter.Label(self.YearlyDataFrame, text=f"PaybackYears={self.PaybackYears:>3.1f} yrs", font=self.bold16Font ).grid( row=1, column=2 )
-        tkinter.Label(self.YearlyDataFrame, text=f"25YearSavings=${self.TwentyFiveYearSavings:>8.2f}", font=self.bold16Font ).grid( row=1, column=3 )
+        tkinter.Label(self.YearlyDataFrame, text=f"SystemCost=${self.SystemCost:>6.2f}", font=self.bold14Font ).grid( row=1, column=0 )
+        tkinter.Label(self.YearlyDataFrame, text=f"YearlyPgeCost=${self.YearlyPgeCost:>6.2f}", font=self.bold14Font ).grid( row=1, column=1 )
+        tkinter.Label(self.YearlyDataFrame, text=f"PaybackYears={self.PaybackYears:>3.1f} yrs", font=self.bold14Font ).grid( row=1, column=2 )
+        tkinter.Label(self.YearlyDataFrame, text=f"25YearSavings=${self.TwentyFiveYearSavings:>8.2f}", font=self.bold14Font ).grid( row=1, column=3 )
 
     def GetDataForDay( self, month, day ):
         Time = []
@@ -575,6 +593,7 @@ class   Option( tkinter.Toplevel ):
         Battery = []
         batteryUsed = []
         Charging = []
+        GridCharging = []
         Excess = []
         Cost = []
         for hourlyData in self.Projections:
@@ -582,7 +601,7 @@ class   Option( tkinter.Toplevel ):
                 continue
             if hourlyData.TimeOfDay.day != day:
                 continue
-            if hourlyData.TimeOfDay.minute != 59:    # Computed hourlyData times end in *:59:59
+            if hourlyData.TimeOfDay.minute != 30:    # Computed hourlyData times end in *:30:00
                 continue
             Time.append( hourlyData.TimeOfDay )
             Usage.append( hourlyData.Usage )
@@ -592,6 +611,7 @@ class   Option( tkinter.Toplevel ):
             Battery.append( hourlyData.Battery )
             batteryUsed.append( hourlyData.BatteryUsed )
             Charging.append( hourlyData.Charging / (self.Efficiency/100) )
+            GridCharging.append( hourlyData.GridCharging / (self.Efficiency/100) )
             Excess.append( hourlyData.NewExcess + hourlyData.OldExcess )
             Cost.append( hourlyData.Cost )
         data = {    'TimeOfDay':    np.array(Time),
@@ -601,6 +621,7 @@ class   Option( tkinter.Toplevel ):
                     'battery':      np.array(Battery),
                     'batteryUsed':  np.array(batteryUsed),
                     'charging':     np.array(Charging),
+                    'gridCharging': np.array(GridCharging),
                     'excess':       np.array(Excess),
                     'cost':         np.array(Cost),
                     'grid':         np.array(Grid) }
@@ -622,15 +643,20 @@ class   Option( tkinter.Toplevel ):
         #print( "batteryUsed=", data['batteryUsed'] )
         #print( "gridBottom=", gridBottom )
         #print( "grid=", data['grid'] )
-        self.day_ax.bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=24), align='center', label='Grid', bottom=gridBottom )
-        self.day_ax.bar( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', width=timedelta(minutes=24), align='center', label='Solar' )
+        self.day_ax.bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=28), align='center', label='Grid', bottom=gridBottom )
+        self.day_ax.bar( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', width=timedelta(minutes=28), align='center', label='Solar' )
         #batteryBottom = data['Usage'] - data['batteryUsed']
         batteryBottom = data['solar'] - data['export']
-        self.day_ax.bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=24), align='center', label='Battery', bottom=batteryBottom)
+        self.day_ax.bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=28), align='center', label='Battery', bottom=batteryBottom)
         #chargingBottom = data['solar'] - data['batteryUsed']
-        self.day_ax.bar( 'TimeOfDay', 'charging', data=data, color='xkcd:sky blue', width=timedelta(minutes=24), align='center', label='Charging', bottom='Usage' )
-        exportBottom = data['solar'] - data['export']
+        self.day_ax.bar( 'TimeOfDay', 'charging', data=data, color='xkcd:sky blue', width=timedelta(minutes=28), align='center', label='Charging', bottom='Usage' )
+        gridChargingBottom = data['grid'] - data['gridCharging']
+        self.day_ax.bar( 'TimeOfDay', 'gridCharging', data=data, color='xkcd:electric blue', width=timedelta(minutes=28), align='center', label='GridCharging', bottom=gridChargingBottom )
+        exportBottom = data['solar'] - data['excess'] - data['export']
         self.day_ax.bar( 'TimeOfDay', 'export', data=data, color='xkcd:fire engine red', width=timedelta(minutes=14), align='center', label='Export', bottom=exportBottom)
+        excessBottom = data['solar'] - data['excess']
+        self.day_ax.bar( 'TimeOfDay', 'excess', data=data, color='xkcd:neon purple', width=timedelta(minutes=14), align='center', label='Excess', bottom=excessBottom)
+
         self.day_ax.legend(loc='upper left')
         self.l1.config( text=f"Today's Cost=${sum(data['cost']):>6.2f}" )
         self.l2.config( text=f"Today's Usage={sum(data['Usage']):>2.1f}kWh" )
@@ -649,6 +675,11 @@ class   Option( tkinter.Toplevel ):
         global SelectedDay, root, myHomeSolar
         #print( f"PlotOption: {self}" )
         #self.fig.clf()
+        w1 = self.canvas.get_tk_widget()
+        if w1 is None:
+            return
+        if not w1.winfo_exists():
+            return
         self.day_ax.cla()
         #self.plotWindow = tkinter.Toplevel(root)
         self.day_ax.xaxis.set_major_locator(mdates.HourLocator())
@@ -660,7 +691,6 @@ class   Option( tkinter.Toplevel ):
  
         #self.toolbar.update()
         #self.toolbar.grid(row=0)
-        w1 = self.canvas.get_tk_widget()
         #w1.grid(row=0)
         w1.pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=True)
 
@@ -700,11 +730,13 @@ class   HomeSolar(tkinter.Tk):
         prevDayButton   = tkinter.Button(master=self, text='Prev Day',    command=select_prevDay)
         nextMonthButton = tkinter.Button(master=self, text='Next Month',  command=select_nextMonth)
         prevMonthButton = tkinter.Button(master=self, text='Prev Month',  command=select_prevMonth)
-        selectButton.grid(  row=1, column=1 )
+        selectButton.grid(  row=1, column=1, columnspan=2, sticky="" )
         prevDayButton.grid( row=2, column=1 )
         nextDayButton.grid( row=2, column=2 )
         prevMonthButton.grid( row=3, column=1 )
         nextMonthButton.grid( row=3, column=2 )
+        self.columnconfigure( 1, uniform=1 )
+        self.columnconfigure( 2, uniform=1 )
         #button = Button(button_ax, text='Select Date', color='xkcd:celery')
 
     def PlotOptions( self ):
@@ -727,10 +759,16 @@ class   HomeSolar(tkinter.Tk):
         # Nov 25 was a very low solar day
         SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=11, day=25 )
         # Aug 9  was a very high solar day with very very high peak usage
-        SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=8, day=9 )
+        # Kevin was visiting and cooked dinner, then used spa that evening while we were cooking.
+        #SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=8, day=9 )
         #self.hourlyProj = []
         priorDay = 0
+        priorDayPeakUsage = 0
+        priorDayPartialPeakUsage = 0
         dailyTotal = 0
+        dailyPeakUsage = 0
+        dailyPartialPeakUsage = 0
+        gridChargingUsed = False
         for data in self.hourlyData:
             oldSolar = -data.SolarProd
             if oldSolar < 0.02: oldSolar = 0 # Clean up output by eliminating trivial solar kWh due to CT accuracy limits
@@ -739,6 +777,10 @@ class   HomeSolar(tkinter.Tk):
             if  priorDay != data.TimeOfDay.day:
                 priorDay = data.TimeOfDay.day
                 dailyTotal = 0
+                priorDayPeakUsage = dailyPeakUsage
+                priorDayPartialPeakUsage = dailyPartialPeakUsage
+                dailyPeakUsage = 0
+                dailyPartialPeakUsage = 0
                 if diagDay.Grid or diagDay.Charging or diagDay.Export:
                     print( f"DiagDay:\n{diagDay}" )
                 diagDay = HourlyProj(time=data.TimeOfDay)
@@ -747,11 +789,15 @@ class   HomeSolar(tkinter.Tk):
 
             newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, usage=data.Usage, battery=battery,
                                 oldExcess=oldSolar, newExcess=newSolar, oldSolar=oldSolar, newSolar=newSolar )
+            if data.TimeOfDay.hour == 9:
+                # Reset gridChargingUsed flag each day at 9am
+                gridChargingUsed = False
             #if verboseDay: print( newHour )
             if isPeakTime( data.TimeOfDay, option.RatePlan ):
                 #
                 # Handle Peak periods
                 #
+                dailyPeakUsage += newHour.Usage
                 # Use NewSolar first
                 newHour.ApplyNewSolarToGrid( )
                 if option.NEM == '1.0':
@@ -766,19 +812,26 @@ class   HomeSolar(tkinter.Tk):
                 #
                 # Handle PartialPeak periods
                 #
+                dailyPartialPeakUsage += newHour.Usage
                 # Rough estimate of upcoming 5 hours of peak usage
                 estPeakUsage = data.Usage * 5.5
                 newHour.ApplyNewSolarToGrid( )
                 if option.NEM == '1.0':
                     # Only use battery for 3-4pm partial peak if we can cover peak usage too
                     if data.TimeOfDay.hour != 15 or newHour.Battery <= data.Usage + estPeakUsage:
-                        newHour.ApplyBatteryToGrid( )
+                        # During Winter, partialPeak rate is less than offPeakRate/batteryEfficiency,
+                        # so using grid charged battery would be more expensive
+                        if isSummerTime(data.TimeOfDay) or not gridChargingUsed:
+                            newHour.ApplyBatteryToGrid( )
                     newHour.ApplyOldSolarToGrid( )
                 else:
                     newHour.ApplyOldSolarToGrid( )
                     # Only use battery if we can cover peak usage too
                     if data.TimeOfDay.hour != 15 or newHour.Battery <= data.Usage + estPeakUsage:
-                        newHour.ApplyBatteryToGrid( )
+                        # During Winter, partialPeak rate is less than offPeakRate/batteryEfficiency,
+                        # so using grid charged battery would be more expensive
+                        if isSummerTime( data.TimeOfDay, option.RatePlan ) or not gridChargingUsed:
+                            newHour.ApplyBatteryToGrid( )
             elif isOffPeakTime( data.TimeOfDay, option.RatePlan ):
                 #
                 # Handle OffPeak periods
@@ -793,17 +846,32 @@ class   HomeSolar(tkinter.Tk):
                     # we can only charge the battery from NewSolar
                     newHour.ApplyOldSolarToBattery( option )
 
-                # Apply remaining battery to grid
-                newHour.ApplyBatteryToGrid( )
+                if data.TimeOfDay.hour <= 9 and not gridChargingUsed:
+                    # Apply remaining battery to grid
+                    newHour.ApplyBatteryToGrid( )
 
             # Apply remaining peak or partial peak NewSolar to battery
             newHour.ApplyNewSolarToBattery( option )
+
+            # Use grid charging if battery wouldn't otherwise get fully charged
+            if True and isOffPeakTime(data.TimeOfDay,option.RatePlan):
+                # Determine how much battery charge we need to cover Peak hours and Summer PartialPeak hours
+                minBatteryChargeForPeak = priorDayPeakUsage if isWinterTime(data.TimeOfDay) else priorDayPeakUsage + priorDayPartialPeakUsage
+
+                desiredGridCharge = max(0, minBatteryChargeForPeak - newHour.Battery)
+                availableCharging = ((maxChargeRate-newHour.Battery) + maxChargeRate*max(0,15-data.TimeOfDay.hour))
+                #if desiredGridCharge > 0:
+                #    print( f"desiredGridCharge={desiredGridCharge:.2f}, availableCharging={availableCharging:.2f}" )
+                if desiredGridCharge > availableCharging:
+                    newHour.ApplyGridToBattery( desiredGridCharge, option )
+                if newHour.GridCharging > 0:
+                    gridChargingUsed = True
 
             # Export excess solar to grid
             newHour.ExportOldSolarToGrid( )
             if True or option.NEM == '3.0':
                 newHour.ExportNewSolarToGrid( )
-            newHour.TimeOfDay += timedelta( minutes=59, seconds=59 )
+            newHour.TimeOfDay += timedelta( minutes=30 )
  
             # Determine costs for this hour
             newHour.DetermineCost( option, dailyTotal )
@@ -821,7 +889,7 @@ class   HomeSolar(tkinter.Tk):
         # Compute yearly costs, paypack period, and 25 year savings
         option.ComputeYearlyCosts()
 
-        print( f'\nProjections for: {option}' )
+        print( f'Projections for: {option}\n' )
 
         if True and (diagTotals.Grid or diagTotals.Charging or diagTotals.Export):
             print( f"DiagTotals:         {diagTotals}" )
@@ -1063,9 +1131,9 @@ def main(argv=None):
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 5600, 22000 ), verbose=options.verbose )
     myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 10000, 27500 ), verbose=options.verbose )
     myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 11214, 29582 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 14225, 52426*0.70), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 14636, 65426*0.70), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 14225, 52426*0.70), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 14636, 65426*0.70), verbose=options.verbose )
     #print("\nNEM 3.0 options")
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 13.5, 11214, 29582 ), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
