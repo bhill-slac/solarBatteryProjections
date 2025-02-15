@@ -26,7 +26,7 @@ estYearlyPgeEscalation  = 0.06      # %
 est2024PgeCost          = 5763.54   # Based on 2024 solar and usage using latest PGE E-TOU-D rate plan numbers
 oldSolarYearlyProd      = 5732      # Based on 2024 solar production measured by our Emporia VUE system
 nonExportLimit          = 5.0       # Based on rating of SMA 5000 Inverter used for NEM 1.0 application
-maxChargeRate           = 5.0       # Tesla Powerwall 3 has 5kW charge rate.  Franklin aPower is 8kW.
+#maxChargeRate           = 5.0       # Tesla Powerwall 3 has 5kW charge rate.  Franklin aPower is 8kW.
 
 # Minumum daily PGE charge if we don't use at least accrue at least that much in grid import charges
 pgeMinDailyDeliveryCharge = 0.39167 # Dollars, approx $12 per month
@@ -79,14 +79,14 @@ RatePlans = {
         },
     "E-ELEC": {
         "Summer": {
-            "OffPeak":      0.40,
-            "PartialPeak":  0.45,
-            "Peak":         0.62
+            "OffPeak":      0.38872,
+            "PartialPeak":  0.44540,
+            "Peak":         0.60728
             },
         "Winter": {
-            "OffPeak":      0.35,
-            "PartialPeak":  0.36,
-            "Peak":         0.38
+            "OffPeak":      0.33982,
+            "PartialPeak":  0.35368,
+            "Peak":         0.37577
             }
         }
     }
@@ -335,7 +335,7 @@ class   HourlyProj:
     def ApplyGridToBattery( self, desiredCharge, options ):
         if self.Battery >= options.MaxBattery:
             return
-        availCharge = max(0, maxChargeRate - self.Charging)     # options.maxChargeRate - self.Charging
+        availCharge = max(0, options.MaxChargeRate - self.Charging)
         newCharge = min( availCharge, options.MaxBattery - self.Battery )
         self.Battery = min( self.Battery + newCharge, options.MaxBattery )
         self.GridCharging += newCharge
@@ -349,7 +349,7 @@ class   HourlyProj:
         if self.Battery >= options.MaxBattery:
             return
         availCharge = self.NewExcess * options.Efficiency / 100
-        newCharge = min( maxChargeRate, availCharge, options.MaxBattery - self.Battery )
+        newCharge = min( options.MaxChargeRate, availCharge, options.MaxBattery - self.Battery )
         self.Battery = min( self.Battery + newCharge, options.MaxBattery )
         self.Charging += newCharge
         self.NewExcess = max( 0, self.NewExcess - newCharge / (options.Efficiency/100) )
@@ -360,7 +360,7 @@ class   HourlyProj:
         if self.Battery >= options.MaxBattery:
             return
         availCharge = self.OldExcess * options.Efficiency / 100
-        newCharge = min( maxChargeRate, availCharge, options.MaxBattery - self.Battery )
+        newCharge = min( options.MaxChargeRate, availCharge, options.MaxBattery - self.Battery )
         self.Battery = min( self.Battery + newCharge, options.MaxBattery )
         self.Charging += newCharge
         self.OldExcess = max( 0, self.OldExcess - newCharge / (options.Efficiency/100) )
@@ -519,13 +519,14 @@ class   HourlyProj:
             self.Cost -= self.Export * 0.06
 
 #   Options for home solar projections
-#   opt1 = Option( 'E-ELEC', '1.0', 13.5, 5600 )
+#   opt1 = Option( 'E-ELEC', '1.0', 13.5, 5, 5600, 32000 )
 class   Option( tkinter.Toplevel ):
-    def __init__( self, parent, ratePlan, nem, maxBattery, newSolarProd, systemCost, efficiency=95 ):
+    def __init__( self, parent, ratePlan, nem, maxBattery, maxChargeRate, newSolarProd, systemCost, efficiency=95 ):
         super().__init__(parent)
         self.RatePlan     = ratePlan      # 'E-ELEC' or 'E-TOU-C' or 'E-TOU-D'
         self.NEM          = nem           # '1.0' or '3.0'
         self.MaxBattery   = maxBattery    # kWh
+        self.MaxChargeRate= maxChargeRate # kWh
         self.Efficiency   = efficiency    # %
         self.NewSolarProd = newSolarProd  # Yearly kWh
         self.SystemCost   = systemCost    # $
@@ -559,7 +560,7 @@ class   Option( tkinter.Toplevel ):
         self.DailyDataFrame.grid(row=2)
 
     def __str__( self ):
-        return f"RatePlan={self.RatePlan:>7}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, Efficiency={self.Efficiency}, NewSolarProd={self.NewSolarProd}\nSystemCost=${self.SystemCost:>6.2f}, YearlyPgeCost=${self.YearlyPgeCost:>6.2f}, PaybackYears={self.PaybackYears:>3.1f} yrs, 25YearSavings=${self.TwentyFiveYearSavings:>8.2f}" 
+        return f"RatePlan={self.RatePlan:>7}, NEM={self.NEM}, MaxBattery={self.MaxBattery}kWh, MaxChargeRate={self.MaxChargeRate}kW, Efficiency={self.Efficiency}, NewSolarProd={self.NewSolarProd}kWh\nSystemCost=${self.SystemCost:>6.2f}, YearlyPgeCost=${self.YearlyPgeCost:>6.2f}, PaybackYears={self.PaybackYears:>3.1f} yrs, 25YearSavings=${self.TwentyFiveYearSavings:>8.2f}" 
 
     def ComputeYearlyCosts( self ):
         YearlyTotals = HourlyProj(battery=self.MaxBattery)
@@ -603,6 +604,8 @@ class   Option( tkinter.Toplevel ):
                 continue
             if hourlyData.TimeOfDay.minute != 30:    # Computed hourlyData times end in *:30:00
                 continue
+            if True:
+                print( hourlyData )
             Time.append( hourlyData.TimeOfDay )
             Usage.append( hourlyData.Usage )
             Solar.append( hourlyData.NewSolar + hourlyData.OldSolar )
@@ -628,9 +631,15 @@ class   Option( tkinter.Toplevel ):
         return data
 
     def PlotDay( self, month, day ):
+        '''
+        Option:PlotDay( self, month, day )
+        '''
         #print( f"PlotDay: {month}/{day} for Option {self}" )
         data = self.GetDataForDay( month, day )
-        self.day_ax.set_yticks( np.arange(int(max(max(data['solar']),max(data['Usage']))+0.99999)+1) )
+        if False:
+            print( f"{month}/{day} data:         {data}" )
+        gridBottom = data['solar'] + data['batteryUsed']
+        self.day_ax.set_yticks( np.arange(int(max(max(data['solar']),max(data['Usage']),max(data['grid'] + data['solar'] + data['batteryUsed']))+0.99999)+1) )
         #print( "max solar=", max(data['solar']) )
         #print( "int max solar=", int(max(data['solar'])+0.9) )
         #print( "yticks range=", np.arange(int(max(data['solar'])+0.9)) )
@@ -639,10 +648,6 @@ class   Option( tkinter.Toplevel ):
         self.day_ax.plot( 'TimeOfDay', 'Usage', data=data, color='xkcd:pale orange' )
         self.day_ax.plot( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', label='Solar Prod' )
         gridBottom = data['solar'] + data['batteryUsed']
-        #print( "solar=", data['solar'] )
-        #print( "batteryUsed=", data['batteryUsed'] )
-        #print( "gridBottom=", gridBottom )
-        #print( "grid=", data['grid'] )
         self.day_ax.bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=28), align='center', label='Grid', bottom=gridBottom )
         self.day_ax.bar( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', width=timedelta(minutes=28), align='center', label='Solar' )
         #batteryBottom = data['Usage'] - data['batteryUsed']
@@ -650,8 +655,8 @@ class   Option( tkinter.Toplevel ):
         self.day_ax.bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=28), align='center', label='Battery', bottom=batteryBottom)
         #chargingBottom = data['solar'] - data['batteryUsed']
         self.day_ax.bar( 'TimeOfDay', 'charging', data=data, color='xkcd:sky blue', width=timedelta(minutes=28), align='center', label='Charging', bottom='Usage' )
-        gridChargingBottom = data['grid'] - data['gridCharging']
-        self.day_ax.bar( 'TimeOfDay', 'gridCharging', data=data, color='xkcd:electric blue', width=timedelta(minutes=28), align='center', label='GridCharging', bottom=gridChargingBottom )
+        gridChargingBottom = data['Usage'] + data['charging'] - (data['gridCharging']/self.Efficiency)
+        self.day_ax.bar( 'TimeOfDay', 'gridCharging', data=data, color='xkcd:electric blue', width=timedelta(minutes=14), align='center', label='GridCharging', bottom=gridChargingBottom )
         exportBottom = data['solar'] - data['excess'] - data['export']
         self.day_ax.bar( 'TimeOfDay', 'export', data=data, color='xkcd:fire engine red', width=timedelta(minutes=14), align='center', label='Export', bottom=exportBottom)
         excessBottom = data['solar'] - data['excess']
@@ -673,7 +678,6 @@ class   Option( tkinter.Toplevel ):
 
     def PlotOption( self ):
         global SelectedDay, root, myHomeSolar
-        #print( f"PlotOption: {self}" )
         #self.fig.clf()
         w1 = self.canvas.get_tk_widget()
         if w1 is None:
@@ -695,6 +699,8 @@ class   Option( tkinter.Toplevel ):
         w1.pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=True)
 
         # Plot data for selected day
+        if True:
+            print( f"PlotOption: {self}" )
         self.PlotDay( SelectedDay.month, SelectedDay.day )
         #self.plotWindow.grab_set()
         self.canvas.draw()
@@ -757,7 +763,8 @@ class   HomeSolar(tkinter.Tk):
                                             month=self.hourlyData[0].TimeOfDay.month,
                                             day=self.hourlyData[0].TimeOfDay.day )
         # Nov 25 was a very low solar day
-        SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=11, day=25 )
+        #SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=11, day=25 )
+        SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=11, day=22 )
         # Aug 9  was a very high solar day with very very high peak usage
         # Kevin was visiting and cooked dinner, then used spa that evening while we were cooking.
         #SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=8, day=9 )
@@ -789,8 +796,8 @@ class   HomeSolar(tkinter.Tk):
 
             newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, usage=data.Usage, battery=battery,
                                 oldExcess=oldSolar, newExcess=newSolar, oldSolar=oldSolar, newSolar=newSolar )
-            if data.TimeOfDay.hour == 9:
-                # Reset gridChargingUsed flag each day at 9am
+            if data.TimeOfDay.hour == 11:
+                # Reset gridChargingUsed flag each day at 11am
                 gridChargingUsed = False
             #if verboseDay: print( newHour )
             if isPeakTime( data.TimeOfDay, option.RatePlan ):
@@ -857,12 +864,13 @@ class   HomeSolar(tkinter.Tk):
             if True and isOffPeakTime(data.TimeOfDay,option.RatePlan):
                 # Determine how much battery charge we need to cover Peak hours and Summer PartialPeak hours
                 minBatteryChargeForPeak = priorDayPeakUsage if isWinterTime(data.TimeOfDay) else priorDayPeakUsage + priorDayPartialPeakUsage
+                # Add 20%
+                minBatteryChargeForPeak *= 1.2
 
                 desiredGridCharge = max(0, minBatteryChargeForPeak - newHour.Battery)
-                availableCharging = ((maxChargeRate-newHour.Battery) + maxChargeRate*max(0,15-data.TimeOfDay.hour))
-                #if desiredGridCharge > 0:
-                #    print( f"desiredGridCharge={desiredGridCharge:.2f}, availableCharging={availableCharging:.2f}" )
-                if desiredGridCharge > availableCharging:
+                availableCharging = ((option.MaxChargeRate-newHour.Battery) + option.MaxChargeRate*max(0,14-data.TimeOfDay.hour))
+                if desiredGridCharge > availableCharging or (availableCharging + newHour.Battery) < minBatteryChargeForPeak:
+                    #print( f"{newHour.TimeOfDay}: desiredGridCharge={desiredGridCharge:.2f}, availableCharging={availableCharging:.2f}, Battery={newHour.Battery:.2f}, minBatteryChargeForPeak={minBatteryChargeForPeak:.2f}" )
                     newHour.ApplyGridToBattery( desiredGridCharge, option )
                 if newHour.GridCharging > 0:
                     gridChargingUsed = True
@@ -1129,16 +1137,19 @@ def main(argv=None):
     print("\nNEM 1.0 options")
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 0, 14000 ), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 5600, 22000 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 10000, 27500 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 11214, 29582 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 14225, 52426*0.70), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 14636, 65426*0.70), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 5, 10000, 27500 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 5, 11214, 29582 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 5, 11214, 29582 + 9800 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 8, 14225, 52426*0.70), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 8, 14032, 47700*0.70), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 8, 14636, 65426*0.70), verbose=options.verbose )
+    # Franklin aPower2
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032, 51000*0.70), verbose=options.verbose )
     #print("\nNEM 3.0 options")
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 13.5, 11214, 29582 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 11214, 29582 + 9800 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 40.5, 11214, 29582 + 9800 + 9800 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 16000, 35000 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 13.5, 8, 11214, 29582 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 8, 11214, 29582 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 40.5, 8, 11214, 29582 + 9800 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 8, 16000, 35000 + 9800 ), verbose=options.verbose )
 
     # Get handle for Tkinter root window and hide it
     #global root
