@@ -336,8 +336,9 @@ class   HourlyProj:
         if self.Battery >= options.MaxBattery:
             return
         availCharge = max(0, options.MaxChargeRate - self.Charging)
-        newCharge = min( availCharge, options.MaxBattery - self.Battery )
+        newCharge = min( desiredCharge, availCharge, options.MaxBattery - self.Battery )
         self.Battery = min( self.Battery + newCharge, options.MaxBattery )
+        self.Charging += newCharge
         self.GridCharging += newCharge
         self.Grid += newCharge / (options.Efficiency/100)
         if self.Grid < 0:
@@ -615,7 +616,7 @@ class Option( tkinter.Toplevel ):
             Export.append( hourlyData.Export )
             Battery.append( hourlyData.Battery )
             batteryUsed.append( hourlyData.BatteryUsed )
-            Charging.append( hourlyData.Charging / (self.Efficiency/100) )
+            Charging.append( (hourlyData.Charging-hourlyData.GridCharging) / (self.Efficiency/100) )
             GridCharging.append( hourlyData.GridCharging / (self.Efficiency/100) )
             Excess.append( hourlyData.NewExcess + hourlyData.OldExcess )
             Cost.append( hourlyData.Cost )
@@ -657,6 +658,7 @@ class Option( tkinter.Toplevel ):
         self.day_ax.bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=28), align='center', label='Battery', bottom=batteryBottom)
         #chargingBottom = data['solar'] - data['batteryUsed']
         self.day_ax.bar( 'TimeOfDay', 'charging', data=data, color='xkcd:sky blue', width=timedelta(minutes=28), align='center', label='Charging', bottom='Usage' )
+        #gridChargingBottom = data['charging'] - data['gridCharging']
         gridChargingBottom = data['Usage'] + data['charging'] - (data['gridCharging']/self.Efficiency)
         self.day_ax.bar( 'TimeOfDay', 'gridCharging', data=data, color='xkcd:electric blue', width=timedelta(minutes=14), align='center', label='GridCharging', bottom=gridChargingBottom )
         exportBottom = data['solar'] - data['excess'] - data['export']
@@ -763,6 +765,7 @@ class   HomeSolar(tkinter.Tk):
         option.Projections.append( HourlyProj( time=self.hourlyData[0].TimeOfDay, battery=battery ) )
         diagTotals = HourlyProj()
         diagDay  = HourlyProj()
+        verboseDay = False
         SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year,
                                             month=self.hourlyData[0].TimeOfDay.month,
                                             day=self.hourlyData[0].TimeOfDay.day )
@@ -776,35 +779,37 @@ class   HomeSolar(tkinter.Tk):
         priorDay = 0
         priorDayPeakUsage = 0
         priorDayPartialPeakUsage = 0
-        priorDayGridChargingUsed = False
+        priorDayGridChargingUsed = 0
         dailyTotal = 0
         dailyPeakUsage = 0
         dailyPartialPeakUsage = 0
-        gridChargingUsed = False
         for data in self.hourlyData:
             oldSolar = -data.SolarProd
             if oldSolar < 0.02: oldSolar = 0 # Clean up output by eliminating trivial solar kWh due to CT accuracy limits
             newSolar = oldSolar * (option.NewSolarProd / oldSolarYearlyProd)
 
             if  priorDay != data.TimeOfDay.day:
+                # Housekeeping for each new day
                 priorDay = data.TimeOfDay.day
                 dailyTotal = 0
-                priorDayPeakUsage = dailyPeakUsage
-                priorDayPartialPeakUsage = dailyPartialPeakUsage
+                decayFactor = 0.60
+                priorDayPeakUsage = (priorDayPeakUsage*decayFactor) + (dailyPeakUsage*(1.0-decayFactor))
+                priorDayPartialPeakUsage = (priorDayPartialPeakUsage*decayFactor) + (dailyPartialPeakUsage*(1.0-decayFactor))
+                #priorDayPeakUsage = dailyPeakUsage
+                #priorDayPartialPeakUsage = dailyPartialPeakUsage
                 dailyPeakUsage = 0
                 dailyPartialPeakUsage = 0
-                if diagDay.Grid or diagDay.Charging or diagDay.Export:
+                priorDayGridChargingUsed = priorDayGridChargingUsed*(1.0-decayFactor) + diagDay.GridCharging
+                if battery < 0.15:
+                    priorDayGridChargingUsed = 0
+                if verboseDay:
                     print( f"DiagDay:\n{diagDay}" )
                 diagDay = HourlyProj(time=data.TimeOfDay)
-            #verboseDay = False # DebugPeakVsOffPeakTimes(data.TimeOfDay)
+ 
             verboseDay = DebugThisDay( data.TimeOfDay, SelectedDay.year, SelectedDay.month, SelectedDay.day )
 
             newHour = HourlyProj( time=data.TimeOfDay, grid=data.Usage, usage=data.Usage, battery=battery,
                                 oldExcess=oldSolar, newExcess=newSolar, oldSolar=oldSolar, newSolar=newSolar )
-            if data.TimeOfDay.hour == 11:
-                # Reset gridChargingUsed flag each day at 11am
-                priorDayGridChargingUsed = gridChargingUsed
-                gridChargingUsed = False
             #if verboseDay: print( newHour )
             if isPeakTime( data.TimeOfDay, option.RatePlan ):
                 #
@@ -826,24 +831,22 @@ class   HomeSolar(tkinter.Tk):
                 # Handle PartialPeak periods
                 #
                 dailyPartialPeakUsage += newHour.Usage
-                # Rough estimate of upcoming 5 hours of peak usage
-                estPeakUsage = data.Usage * 5.5
                 newHour.ApplyNewSolarToGrid( )
                 if option.NEM == '1.0':
                     # Only use battery for 3-4pm partial peak if we can cover peak usage too
-                    if data.TimeOfDay.hour != 15 or newHour.Battery <= data.Usage + estPeakUsage:
+                    if data.TimeOfDay.hour != 15 or newHour.Battery <= (data.Usage + priorDayPeakUsage):
                         # During Winter, partialPeak rate is less than offPeakRate/batteryEfficiency,
                         # so using grid charged battery would be more expensive
-                        if isSummerTime(data.TimeOfDay) or (not gridChargingUsed and not priorDayGridChargingUsed):
+                        if isSummerTime(data.TimeOfDay) or ((priorDayGridChargingUsed+diagDay.GridCharging) < 0.2) or newHour.Battery > 3:
                             newHour.ApplyBatteryToGrid( )
                     newHour.ApplyOldSolarToGrid( )
                 else:
                     newHour.ApplyOldSolarToGrid( )
                     # Only use battery if we can cover peak usage too
-                    if data.TimeOfDay.hour != 15 or newHour.Battery <= data.Usage + estPeakUsage:
+                    if data.TimeOfDay.hour != 15 or newHour.Battery <= (data.Usage + priorDayPeakUsage):
                         # During Winter, partialPeak rate is less than offPeakRate/batteryEfficiency,
                         # so using grid charged battery would be more expensive
-                        if isSummerTime( data.TimeOfDay, option.RatePlan ) or (not gridChargingUsed and not priorDayGridChargingUsed):
+                        if isSummerTime(data.TimeOfDay) or ((priorDayGridChargingUsed+diagDay.GridCharging) < 0.2) or newHour.Battery > 3:
                             newHour.ApplyBatteryToGrid( )
             elif isOffPeakTime( data.TimeOfDay, option.RatePlan ):
                 #
@@ -859,7 +862,7 @@ class   HomeSolar(tkinter.Tk):
                     # we can only charge the battery from NewSolar
                     newHour.ApplyOldSolarToBattery( option )
 
-                if data.TimeOfDay.hour <= 9 and not gridChargingUsed and not priorDayGridChargingUsed:
+                if data.TimeOfDay.hour <= 9 and (priorDayGridChargingUsed+diagDay.GridCharging) < 0.1:
                     # Apply remaining battery to grid
                     newHour.ApplyBatteryToGrid( )
 
@@ -870,16 +873,18 @@ class   HomeSolar(tkinter.Tk):
             if option.UseGridCharging and isOffPeakTime(data.TimeOfDay,option.RatePlan):
                 # Determine how much battery charge we need to cover Peak hours and Summer PartialPeak hours
                 minBatteryChargeForPeak = priorDayPeakUsage if isWinterTime(data.TimeOfDay) else priorDayPeakUsage + priorDayPartialPeakUsage
-                # Subtract 45% as we don't want to use grid charging more than needed as we lose money then.
-                minBatteryChargeForPeak *= 0.55
-
+                # Subtract ?% as we don't want to use grid charging more than needed as we lose money then.
+                #minBatteryChargeForPeak *= 0.8
+                minBatteryStateOfCharge = 10.0
+                minBatteryChargeForPeak = minBatteryStateOfCharge
                 desiredGridCharge = max(0, minBatteryChargeForPeak - newHour.Battery)
-                availableCharging = (min( option.MaxBattery-newHour.Battery, option.MaxChargeRate-newHour.Charging ) + option.MaxChargeRate*max(0,14-data.TimeOfDay.hour))
-                if desiredGridCharge > availableCharging:  # Wrong!  This encourages topping off the battery, setting gridChargingUsed flag unnecessarily
-                    #print( f"{newHour.TimeOfDay}: desiredGridCharge={desiredGridCharge:.2f}, availableCharging={availableCharging:.2f}, Battery={newHour.Battery:.2f}, minBatteryChargeForPeak={minBatteryChargeForPeak:.2f}" )
+                availableCharging = min( option.MaxBattery-newHour.Battery, option.MaxChargeRate-newHour.Charging )
+                if  desiredGridCharge > availableCharging:
+                    desiredGridCharge = availableCharging
+                laterCharging = option.MaxChargeRate*max(0,14-data.TimeOfDay.hour)
+                if desiredGridCharge > (laterCharging + 1.0):
+                    print( f"{newHour.TimeOfDay}: desiredGridCharge={desiredGridCharge:.2f}, availableCharging={availableCharging:.2f}, Battery={newHour.Battery:.2f}, minBatteryChargeForPeak={minBatteryChargeForPeak:.2f}, priorDayPeakUsage={priorDayPeakUsage:.2f}" )
                     newHour.ApplyGridToBattery( desiredGridCharge, option )
-                if newHour.GridCharging > 0:
-                    gridChargingUsed = True
 
             # Export excess solar to grid
             newHour.ExportOldSolarToGrid( )
@@ -892,9 +897,9 @@ class   HomeSolar(tkinter.Tk):
 
             # Hold remaining battery for next hour
             battery = newHour.Battery
-            diagTotals = diagTotals + newHour
+            diagTotals += newHour
+            diagDay    += newHour
             if verboseDay:
-                diagDay = diagDay + newHour
                 print( newHour )
 
             # Add newHour to computed projections
