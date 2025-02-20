@@ -817,13 +817,14 @@ class   HomeSolar(tkinter.Tk):
                 # Handle Peak periods
                 #
                 dailyPeakUsage += newHour.Usage
-                # Use NewSolar first
-                newHour.ApplyNewSolarToGrid( )
                 if option.NEM == '1.0':
-                    # Battery then OldSolar
+                    # Battery then Solar
                     newHour.ApplyBatteryToGrid( )
+                    newHour.ApplyNewSolarToGrid( )
                     newHour.ApplyOldSolarToGrid( )
                 else:
+                    # Use NewSolar first
+                    newHour.ApplyNewSolarToGrid( )
                     # OldSolar then Battery
                     newHour.ApplyOldSolarToGrid( )
                     newHour.ApplyBatteryToGrid( )
@@ -832,19 +833,20 @@ class   HomeSolar(tkinter.Tk):
                 # Handle PartialPeak periods
                 #
                 dailyPartialPeakUsage += newHour.Usage
-                newHour.ApplyNewSolarToGrid( )
                 if option.NEM == '1.0':
                     # Only use battery for 3-4pm partial peak if we can cover peak usage too
-                    if data.TimeOfDay.hour != 15 or newHour.Battery <= (data.Usage + priorDayPeakUsage):
+                    if data.TimeOfDay.hour != 15 or newHour.Battery >= (data.Usage + priorDayPeakUsage):
                         # During Winter, partialPeak rate is less than offPeakRate/batteryEfficiency,
                         # so using grid charged battery would be more expensive
                         if isSummerTime(data.TimeOfDay) or ((priorDayGridChargingUsed+diagDay.GridCharging) < 0.2) or newHour.Battery > 3:
                             newHour.ApplyBatteryToGrid( )
+                    newHour.ApplyNewSolarToGrid( )
                     newHour.ApplyOldSolarToGrid( )
                 else:
+                    newHour.ApplyNewSolarToGrid( )
                     newHour.ApplyOldSolarToGrid( )
                     # Only use battery if we can cover peak usage too
-                    if data.TimeOfDay.hour != 15 or newHour.Battery <= (data.Usage + priorDayPeakUsage):
+                    if data.TimeOfDay.hour != 15 or newHour.Battery >= (data.Usage + priorDayPeakUsage):
                         # During Winter, partialPeak rate is less than offPeakRate/batteryEfficiency,
                         # so using grid charged battery would be more expensive
                         if isSummerTime(data.TimeOfDay) or ((priorDayGridChargingUsed+diagDay.GridCharging) < 0.2) or newHour.Battery > 3:
@@ -864,11 +866,9 @@ class   HomeSolar(tkinter.Tk):
                     newHour.ApplyOldSolarToBattery( option )
 
                 if data.TimeOfDay.hour <= 9 and (priorDayGridChargingUsed+diagDay.GridCharging) < 0.1:
+                    # and data.TimeOfDay.month < 11 and data.TimeOfDay.month > 2 ):
                     # Apply remaining battery to grid
                     newHour.ApplyBatteryToGrid( )
-
-            # Apply remaining peak or partial peak NewSolar to battery
-            newHour.ApplyNewSolarToBattery( option )
 
             # Use grid charging if battery wouldn't otherwise get fully charged
             if option.UseGridCharging and isOffPeakTime(data.TimeOfDay,option.RatePlan):
@@ -892,6 +892,9 @@ class   HomeSolar(tkinter.Tk):
             if True or option.NEM == '3.0':
                 newHour.ExportNewSolarToGrid( )
             newHour.TimeOfDay += timedelta( minutes=30 )
+
+            # Apply remaining peak or partial peak NewSolar to battery
+            newHour.ApplyNewSolarToBattery( option )
  
             # Determine costs for this hour
             newHour.DetermineCost( option, dailyTotal )
