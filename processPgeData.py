@@ -563,7 +563,7 @@ class Option( tkinter.Toplevel ):
         self.DailyDataFrame.grid(row=2)
 
     def __str__( self ):
-        return f"RatePlan={self.RatePlan:>7}, NEM={self.NEM}, MaxBattery={self.MaxBattery}kWh, MaxChargeRate={self.MaxChargeRate}kW, Efficiency={self.Efficiency}, NewSolarProd={self.NewSolarProd}kWh\nSystemCost=${self.SystemCost:>6.2f}, YearlyPgeCost=${self.YearlyPgeCost:>6.2f}, PaybackYears={self.PaybackYears:>3.1f} yrs, 25YearSavings=${self.TwentyFiveYearSavings:>8.2f}" 
+        return f"RatePlan={self.RatePlan:>7}, NEM={self.NEM}, MaxBattery={self.MaxBattery}kWh, MaxChargeRate={self.MaxChargeRate}kW, Efficiency={self.Efficiency}, NewSolarProd={self.NewSolarProd}kWh\nSystemCost=${self.SystemCost:>6.2f}, YearlyPgeCost=${self.YearlyPgeCost:>6.2f}, PaybackYears={self.PaybackYears:>4.2f} yrs, 25YearSavings=${self.TwentyFiveYearSavings:>.2f}" 
 
     def ComputeYearlyCosts( self ):
         YearlyTotals = HourlyProj(battery=self.MaxBattery)
@@ -583,10 +583,11 @@ class Option( tkinter.Toplevel ):
         self.TwentyFiveYearSavings = totalSavings
         #print( f"Est Yearly PGE cost in 25 years={estFutureCostAsIs:$>6.2f}" )
         #print( f"Est Yearly Option cost in 25 years={estFutureCostOfOption:$>6.2f}" )
-        tkinter.Label(self.YearlyDataFrame, text=f"SystemCost=${self.SystemCost:>6.0f}", font=self.bold14Font ).grid( row=1, column=0 )
-        tkinter.Label(self.YearlyDataFrame, text=f"YearlyPgeCost=${self.YearlyPgeCost:>6.0f}", font=self.bold14Font ).grid( row=1, column=1 )
-        tkinter.Label(self.YearlyDataFrame, text=f"PaybackYears={self.PaybackYears:>3.1f} yrs", font=self.bold14Font ).grid( row=1, column=2 )
-        tkinter.Label(self.YearlyDataFrame, text=f"25YearSavings=${self.TwentyFiveYearSavings:>8.0f}", font=self.bold14Font ).grid( row=1, column=3 )
+        tkinter.Label(self.YearlyDataFrame, text=f"SystemCost=${self.SystemCost:>.0f}", font=self.bold14Font ).grid( row=1, column=0 )
+        tkinter.Label(self.YearlyDataFrame, text=f"YrlyPgeCost=${self.YearlyPgeCost:>.0f}", font=self.bold14Font ).grid( row=1, column=1 )
+        tkinter.Label(self.YearlyDataFrame, text=f"PaybkYrs={self.PaybackYears:>.2f} yrs", font=self.bold14Font ).grid( row=1, column=2 )
+        tkinter.Label(self.YearlyDataFrame, text=f"25YrSavings=${self.TwentyFiveYearSavings:>.0f}", font=self.bold14Font ).grid( row=1, column=3 )
+        tkinter.Label(self.YearlyDataFrame, text=f"YrlyExcess={YearlyTotals.OldExcess+YearlyTotals.NewExcess:>.0f}kWh", font=self.bold14Font ).grid( row=1, column=4 )
 
     def GetDataForDay( self, month, day ):
         Time = []
@@ -1156,8 +1157,26 @@ def main(argv=None):
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 8, 14032, 47700*0.70), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 8, 14636, 65426*0.70), verbose=options.verbose )
     # Franklin aPower2
-    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032, 51000*0.70, useGridCharging=0), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*6, (51000-1400*6)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*5, (51000-1400*5)*0.70, useGridCharging=1), verbose=options.verbose )
+    # NEM 1.0 payback: 6.61yrs 17 panels, 11256 kWh, YearlyPGE=$839, $31789 cost after rebate
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*4, (51000-1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
+    # Best NEM 1.0 payback: 6.59yrs 18 panels, 11950 kWh, YearlyPGE=$671, $32760 cost after rebate
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*3, (51000-1400*3)*0.70, useGridCharging=0), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*3, (51000-1400*3)*0.70, useGridCharging=1), verbose=options.verbose )
+    # NEM 1.0 payback: 6.60yrs 19 panels, 12644 kWh, YearlyPGE=$524, $33740 cost after rebate
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*2, (51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694, (51000-1400)*0.70, useGridCharging=0), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694, (51000-1400)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032, 51000*0.70, useGridCharging=0), verbose=options.verbose )
+    # NEM 1.0 payback: 6.63yrs 21 panels, 14032 kWh, YearlyPGE=$253, $35700 cost after rebate
     myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032, 51000*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14726, 52400*0.70, useGridCharging=0), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14726, 52400*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 30.0,16, 14726, (52400+12900)*0.70, useGridCharging=0), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 30.0,16, 14726, (52400+12900)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 15250, 53800*0.70, useGridCharging=0), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 15250, 53800*0.70, useGridCharging=1), verbose=options.verbose )
     #print("\nNEM 3.0 options")
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 13.5, 8, 11214, 29582 ), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 8, 11214, 29582 + 9800 ), verbose=options.verbose )
