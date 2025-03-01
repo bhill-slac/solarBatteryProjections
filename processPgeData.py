@@ -22,7 +22,8 @@ from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg, NavigationTool
 # Should be around Dec 23, 2009
 # Also look at impact after I washed solar panels 1/17/09
 
-estYearlyPgeEscalation  = 0.06      # %
+newSolarExportable      = True
+estYearlyPgeEscalation  = 0.04      # %
 est2024PgeCost          = 5763.54   # Based on 2024 solar and usage using latest PGE E-TOU-D rate plan numbers
 oldSolarYearlyProd      = 5732      # Based on 2024 solar production measured by our Emporia VUE system
 nonExportLimit          = 5.0       # Based on rating of SMA 5000 Inverter used for NEM 1.0 application
@@ -593,6 +594,7 @@ class Option( tkinter.Toplevel ):
         Time = []
         Usage = []
         Solar = []
+        OldSolar = []
         Grid = []
         Export = []
         Battery = []
@@ -613,6 +615,7 @@ class Option( tkinter.Toplevel ):
             Time.append( hourlyData.TimeOfDay )
             Usage.append( hourlyData.Usage )
             Solar.append( hourlyData.NewSolar + hourlyData.OldSolar )
+            OldSolar.append( hourlyData.OldSolar )
             Grid.append( hourlyData.Grid )
             Export.append( hourlyData.Export )
             Battery.append( hourlyData.Battery )
@@ -624,6 +627,7 @@ class Option( tkinter.Toplevel ):
         data = {    'TimeOfDay':    np.array(Time),
                     'Usage':        np.array(Usage),
                     'solar':        np.array(Solar),
+                    'oldSolar':     np.array(OldSolar),
                     'export':       np.array(Export),
                     'battery':      np.array(Battery),
                     'batteryUsed':  np.array(batteryUsed),
@@ -642,7 +646,10 @@ class Option( tkinter.Toplevel ):
         data = self.GetDataForDay( month, day )
         if False:
             print( f"{month}/{day} data:         {data}" )
-        gridBottom = data['solar'] + data['batteryUsed']
+        if newSolarExportable:
+            gridBottom = data['solar'] + data['batteryUsed']
+        else:
+            gridBottom = data['oldSolar'] + data['batteryUsed']
         self.day_ax.set_yticks( np.arange(int(max(max(data['solar']),max(data['Usage']),max(data['grid'] + data['solar'] + data['batteryUsed']))+0.99999)+1) )
         #print( "max solar=", max(data['solar']) )
         #print( "int max solar=", int(max(data['solar'])+0.9) )
@@ -652,13 +659,14 @@ class Option( tkinter.Toplevel ):
         self.day_ax.plot( 'TimeOfDay', 'Usage', data=data, color='xkcd:pale orange' )
         self.day_ax.plot( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', label='Solar Prod' )
         gridBottom = data['solar'] + data['batteryUsed']
-        self.day_ax.bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=28), align='center', label='Grid', bottom=gridBottom )
-        self.day_ax.bar( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', width=timedelta(minutes=28), align='center', label='Solar' )
+        self.day_ax.bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=34), align='center', label='Grid', bottom=gridBottom )
+        self.day_ax.bar( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', width=timedelta(minutes=34), align='center', label='Solar' )
         #batteryBottom = data['Usage'] - data['batteryUsed']
-        batteryBottom = data['solar'] - data['export']
-        self.day_ax.bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=28), align='center', label='Battery', bottom=batteryBottom)
+        batteryBottom = data['solar'] - data['excess'] - data['export'] - data['charging']
+        self.day_ax.bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=34), align='center', label='Battery', bottom=batteryBottom)
         #chargingBottom = data['solar'] - data['batteryUsed']
-        self.day_ax.bar( 'TimeOfDay', 'charging', data=data, color='xkcd:sky blue', width=timedelta(minutes=28), align='center', label='Charging', bottom='Usage' )
+        chargingBottom = data['Usage'] - data['batteryUsed']
+        self.day_ax.bar( 'TimeOfDay', 'charging', data=data, color='xkcd:sky blue', width=timedelta(minutes=28), align='center', label='Charging', bottom=chargingBottom )
         #gridChargingBottom = data['charging'] - data['gridCharging']
         gridChargingBottom = data['Usage'] + data['charging'] - (data['gridCharging']/self.Efficiency)
         self.day_ax.bar( 'TimeOfDay', 'gridCharging', data=data, color='xkcd:electric blue', width=timedelta(minutes=14), align='center', label='GridCharging', bottom=gridChargingBottom )
@@ -889,7 +897,7 @@ class   HomeSolar(tkinter.Tk):
 
             # Export excess solar to grid
             newHour.ExportOldSolarToGrid( )
-            if True or option.NEM == '3.0':
+            if newSolarExportable or option.NEM == '3.0':
                 newHour.ExportNewSolarToGrid( )
             newHour.TimeOfDay += timedelta( minutes=30 )
 
@@ -1159,6 +1167,9 @@ def main(argv=None):
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 8, 14225, 52426*0.70), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 8, 14032, 47700*0.70), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 8, 14636, 65426*0.70), verbose=options.verbose )
+    # Enphase Inverters w/ 3 Enphase 5P Batteries
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14726, 53900*0.70, useGridCharging=1, efficiency=90), verbose=options.verbose )
+
     # Franklin aPower2
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*6, (51000-1400*6)*0.70, useGridCharging=1), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*5, (51000-1400*5)*0.70, useGridCharging=1), verbose=options.verbose )
@@ -1169,22 +1180,38 @@ def main(argv=None):
     myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*3, (51000-1400*3)*0.70, useGridCharging=1), verbose=options.verbose )
     # NEM 1.0 payback: 6.60yrs 19 panels, 12644 kWh, YearlyPGE=$524, $33740 cost after rebate
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*2, (51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694, (51000-1400)*0.70, useGridCharging=0), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694, (51000-1400)*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032, 51000*0.70, useGridCharging=0), verbose=options.verbose )
     # NEM 1.0 payback: 6.63yrs 21 panels, 14032 kWh, YearlyPGE=$253, $35700 cost after rebate
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032, 51000*0.70, useGridCharging=0), verbose=options.verbose )
     myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032, 51000*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14726, 52400*0.70, useGridCharging=0), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14726, 52400*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 30.0,16, 14726, (52400+12900)*0.70, useGridCharging=0), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 30.0, 16,14032, (51000+12900)*0.70, useGridCharging=1), verbose=options.verbose )
+    # Latest Franklin aPower2 proposal
+    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14726, 52400*0.70, useGridCharging=1), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 30.0,16, 14726, (52400+12900)*0.70, useGridCharging=1), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 15250, 53800*0.70, useGridCharging=0), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 15250, 53800*0.70, useGridCharging=1), verbose=options.verbose )
     #print("\nNEM 3.0 options")
     #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 13.5, 8, 11214, 29582 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 8, 11214, 29582 + 9800 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 40.5, 8, 11214, 29582 + 9800 + 9800 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 8, 16000, 35000 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 8, 11214, 29582 + 12900 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 40.5, 8, 11214, 29582 + 12900 + 12900 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 8, 16000, 35000 + 12900 ), verbose=options.verbose )
+    # Franklin aPower2
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 15.0, 8, 14032-694*4, (51000-1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 15.0, 8, 14032-694*3, (51000-1400*3)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 15.0, 8, 14032-694*2, (51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
+    # SystemCost=$40810, NewSolar=11256kWh, Battery=30kWh, YrlyPgeCost=$1256, PaybkYrs=9.06
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032-694*4, (12900+51000-1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032-694*3, (12900+51000-1400*3)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032-694*2, (12900+51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032-694*1, (12900+51000-1400*1)*0.70, useGridCharging=1), verbose=options.verbose )
+
+    # NEM 3.0 payback: 9.01yrs 21 panels, 14032kWh, 2 aPower2 batteries, YearlyPGE=$1251, $44730 cost after rebate
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032-694*0, (12900+51000-1400*0)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032+694*4, (12900+51000+1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
+    # SystemCost=$54530, YrlyPgeCost=$605, PaybkYrs=9.42, NewSolar=20972kWh, Battery=30kWh
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032+694*10, (12900+51000+1400*10)*0.70, useGridCharging=1), verbose=options.verbose )
+    # SystemCost=$63560, YrlyPgeCost=$429, PaybkYrs=10.25, NewSolar=20972kWh, Battery=45kWh
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 45.0,24, 14032+694*10, (12900*2+51000+1400*10)*0.70, useGridCharging=1), verbose=options.verbose )
 
     # Get handle for Tkinter root window and hide it
     #global root
