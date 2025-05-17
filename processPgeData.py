@@ -18,10 +18,6 @@ from tkcalendar import Calendar
 from matplotlib.backend_bases import key_press_handler
 from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg, NavigationToolbar2Tk)
 
-# Note: Look for PGE usage on day I shutoff our solar for the day.
-# Should be around Dec 23, 2009
-# Also look at impact after I washed solar panels 1/17/09
-
 newSolarExportable      = True
 estYearlyPgeEscalation  = 0.04      # %
 est2024PgeCost          = 5763.54   # Based on 2024 solar and usage using latest PGE E-TOU-D rate plan numbers
@@ -180,7 +176,7 @@ def isOffPeakTime( timeOfDay, ratePlan ):
         return False
     return False
 
-class   HourlyData:
+class HourlyData:
     def __init__( self ):
         self.Usage     = 0
         self.SolarProd = 0
@@ -239,7 +235,7 @@ def isWinterOffPeakTime( timeOfDay, ratePlan ):
     return False
 
 # class HourlyProj
-class   HourlyProj:
+class HourlyProj:
     """
     Used to compute hour by hour projections of grid vs solar vs battery status
     Includes usage, solar production, charging, export, excess solar, etc.
@@ -521,10 +517,11 @@ class   HourlyProj:
             self.Cost -= self.Export * 0.06
 
 #   Options for home solar projections
-#   opt1 = Option( 'E-ELEC', '1.0', 13.5, 5, 5600, 32000 )
+#   opt1 = Option( 'Tesla', 'E-ELEC', '1.0', 13.5, 5, 5600, 32000 )
 class Option( tkinter.Toplevel ):
-    def __init__( self, parent, ratePlan, nem, maxBattery, maxChargeRate, newSolarProd, systemCost, useGridCharging=0, efficiency=95 ):
+    def __init__( self, parent, vendor, ratePlan, nem, maxBattery, maxChargeRate, newSolarProd, systemCost, useGridCharging=0, efficiency=95 ):
         super().__init__(parent)
+        self.Vendor       = vendor
         self.RatePlan     = ratePlan      # 'E-ELEC' or 'E-TOU-C' or 'E-TOU-D'
         self.NEM          = nem           # '1.0' or '3.0'
         self.MaxBattery   = maxBattery    # kWh
@@ -539,7 +536,7 @@ class Option( tkinter.Toplevel ):
         self.Projections   = []
         #print( f"class Option: Created {self}" )
         # Set title, create figure and actors 
-        plotTitle = f"RatePlan={self.RatePlan}, NEM={self.NEM}, MaxBattery={self.MaxBattery}, NewSolarProd={self.NewSolarProd}, UseGridCharging={self.UseGridCharging}"
+        plotTitle = f"{self.MaxBattery}kWh {self.Vendor} Battery, NewSolarProd={self.NewSolarProd}, RatePlan={self.RatePlan}, NEM={self.NEM}, UseGridCharging={self.UseGridCharging}"
         self.title(plotTitle)
         self.YearlyDataFrame = tkinter.Frame(self, height=40)
         self.DailyGraphFrame = tkinter.Frame(self, height=120)
@@ -998,7 +995,9 @@ class   HomeSolar(tkinter.Tk):
         # vueData also includes an extra entry for midnight on the day after the last export day
         # i.e.  Exporting 1/1/24 to 12/31/24 includes an entry for 1/1/25 00:00
         usage = 0
-        extraHour  = max(vueData.keys())
+        extraHour  = 25
+        if len(vueData) > 0:
+            extraHour = max(vueData.keys())
         for hourTime, solarProd in vueData.items():
             if hourTime in pgeData:
                 usage = pgeData[hourTime]
@@ -1138,6 +1137,7 @@ def main(argv=None):
         print( 'From %s to %s' % ( min(pgeData.keys()).strftime('%m/%d/%Y, %H:%M'),
                                    max(pgeData.keys()).strftime('%m/%d/%Y, %H:%M') ) )
 
+    global vueData
     if options.vueDataFiles:
         for vueDataFile in options.vueDataFiles:
             newData = readVueData( vueDataFile, verbose=options.verbose )
@@ -1155,63 +1155,94 @@ def main(argv=None):
     myHomeSolar.ProcessDataFiles( pgeData, vueData, options.verbose )
 
     print("Current PGE Rate Plan Costs")
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-TOU-D', '1.0', 0, 0, 0 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-TOU-C', '1.0', 0, 0, 0 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'None', 'E-TOU-D', '1.0', 0, 0, 0 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'None', 'E-TOU-C', '1.0', 0, 0, 0 ), verbose=options.verbose )
     print("\nNEM 1.0 options")
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 0, 14000 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 5600, 22000 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 5, 10000, 27500 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 5, 11214, 29582 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 5, 11214, 29582 + 9800 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Tesla', 'E-ELEC', '1.0', 13.5, 0, 14000 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Tesla', 'E-ELEC', '1.0', 13.5, 5600, 22000 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Tesla', 'E-ELEC', '1.0', 13.5, 5, 10000, 27500 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Tesla', 'E-ELEC', '1.0', 13.5, 5, 11214, 29582 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Tesla', 'E-ELEC', '1.0', 27.0, 5, 11214, 29582 + 9800 ), verbose=options.verbose )
 
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 8, 14225, 52426*0.70), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 13.5, 8, 14032, 47700*0.70), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 27.0, 8, 14636, 65426*0.70), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 13.5, 8, 14225, 52426*0.70), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 13.5, 8, 14032, 47700*0.70), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 27.0, 8, 14636, 65426*0.70), verbose=options.verbose )
+
+    # Enphase Inverters w/ 4 Enphase 5P Batteries
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-4x5P', 'E-ELEC', '3.0', 5.0*4, 3.2*4, 14247+694*-0, (60300+1400*-0)*0.70, useGridCharging=1, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-4x5P', 'E-ELEC', '3.0', 5.0*4, 3.2*4, 14247+694*-2, (60300+1400*-2)*0.70, useGridCharging=1, efficiency=90), verbose=options.verbose )
+    # Best NEM 3.0 payback: 9.81yrs 18 panels, 10777 kWh, YearlyPGE=$2150, $37310 cost after rebate
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-4x5P', 'E-ELEC', '3.0', 5.0*4, 3.2*4, 14247+694*-5, (60300+1400*-5)*0.70, useGridCharging=1, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-4x5P', 'E-ELEC', '3.0', 5.0*4, 3.2*4, 14247+694*-6, (60300+1400*-6)*0.70, useGridCharging=1, efficiency=90), verbose=options.verbose )
+
     # Enphase Inverters w/ 3 Enphase 5P Batteries
-    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14726, 53900*0.70, useGridCharging=1, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14247, 54900*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 12871+672*-0, (49500+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14215+672*-0, (52000+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 12871+687*2, (49500+1400*2)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    # Best NEM 1.0 payback: 7.21yrs 23 panels, 12859 kWh, YearlyPGE=$482, $36470 cost after rebate
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14247+694*-0, (54900+1400*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14247+694*-2, (54900+1400*-2)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14247+694*4, (54900+1400*4)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14247+694*-8, (54900+1400*-8)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    # Best NEM 3.0 payback: 9.56yrs 16 panels, 9389 kWh, YearlyPGE=$2599, $31570 cost after rebate
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14247+694*-7, (54900+1400*-7)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14247+694*-2, (54900+1400*-2)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 12871+672*-0, (49500+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14215+672*-0, (52000+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14247+694*-6, (54900+1400*-6)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+
+    # Enphase Inverters w/ 2 Enphase 5P Batteries
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-2x5P', 'E-ELEC', '1.0', 5.0*2, 3.2*2, 14247, 49500*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    # Best NEM 1.0 payback: 6.81yrs 21 panels, 12859 kWh, YearlyPGE=$660, $32690 cost after rebate
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-2x5P', 'E-ELEC', '1.0', 5.0*2, 3.2*2, 14247+694*-2, (49500+1400*-2)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-2x5P', 'E-ELEC', '3.0', 5.0*2, 3.2*2, 14247+694*-2, (49500+1400*-2)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    # Enphase Inverters w/ 2 Enphase 10C Batteries
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-2x10C', 'E-ELEC', '1.0', 10.0*2, 3.2*4, 14247, 63500*0.70, useGridCharging=1, efficiency=90), verbose=options.verbose )
 
     # Franklin aPower2
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*6, (51000-1400*6)*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*5, (51000-1400*5)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 15.0, 8, 14032-694*6, (51000-1400*6)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 15.0, 8, 14032-694*5, (51000-1400*5)*0.70, useGridCharging=1), verbose=options.verbose )
     # NEM 1.0 payback: 6.61yrs 17 panels, 11256 kWh, YearlyPGE=$839, $31789 cost after rebate
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*4, (51000-1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 15.0, 8, 14032-694*4, (51000-1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
     # Best NEM 1.0 payback: 6.59yrs 18 panels, 11950 kWh, YearlyPGE=$671, $32760 cost after rebate
-    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*3, (51000-1400*3)*0.70, useGridCharging=0), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*3, (51000-1400*3)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 15.0, 8, 14032-694*3, (51000-1400*3)*0.70, useGridCharging=0, efficiency=90 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 15.0, 8, 14247-694*0, (51000+2500-1400*0)*0.70, useGridCharging=0), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 15.0, 8, 14032-694*3, (51000-1400*3)*0.70, useGridCharging=1, efficiency=90 ), verbose=options.verbose )
     # NEM 1.0 payback: 6.60yrs 19 panels, 12644 kWh, YearlyPGE=$524, $33740 cost after rebate
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694*2, (51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032-694, (51000-1400)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 15.0, 8, 14032-694*2, (51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 15.0, 8, 14032-694, (51000-1400)*0.70, useGridCharging=1), verbose=options.verbose )
     # NEM 1.0 payback: 6.63yrs 21 panels, 14032 kWh, YearlyPGE=$253, $35700 cost after rebate
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032, 51000*0.70, useGridCharging=0), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14032, 51000*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 30.0, 16,14032, (51000+12900)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 15.0, 8, 14032, 51000*0.70, useGridCharging=0), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 15.0, 8, 14032, 51000*0.70, useGridCharging=1, efficiency=90 ), verbose=options.verbose)
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 30.0, 16,14032, (51000+12900)*0.70, useGridCharging=1), verbose=options.verbose )
     # Latest Franklin aPower2 proposal
-    myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 14726, 52400*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 30.0,16, 14726, (52400+12900)*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 15250, 53800*0.70, useGridCharging=0), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '1.0', 15.0, 8, 15250, 53800*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 15.0, 8, 14726, 52400*0.70, useGridCharging=0, efficiency=90 ), verbose=options.verbose)
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 30.0,16, 14726, (52400+12900)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 15.0, 8, 15250, 53800*0.70, useGridCharging=0), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '1.0', 15.0, 8, 15250, 53800*0.70, useGridCharging=1), verbose=options.verbose )
     #print("\nNEM 3.0 options")
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 13.5, 8, 11214, 29582 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 8, 11214, 29582 + 12900 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 40.5, 8, 11214, 29582 + 12900 + 12900 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 27.0, 8, 16000, 35000 + 12900 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 13.5, 8, 11214, 29582 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 27.0, 8, 11214, 29582 + 12900 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 40.5, 8, 11214, 29582 + 12900 + 12900 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 27.0, 8, 16000, 35000 + 12900 ), verbose=options.verbose )
     # Franklin aPower2
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 15.0, 8, 14032-694*4, (51000-1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 15.0, 8, 14032-694*3, (51000-1400*3)*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 15.0, 8, 14032-694*2, (51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 15.0, 8, 14032-694*4, (51000-1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 15.0, 8, 14032-694*3, (51000-1400*3)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 15.0, 8, 14032-694*2, (51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
     # SystemCost=$40810, NewSolar=11256kWh, Battery=30kWh, YrlyPgeCost=$1256, PaybkYrs=9.06
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032-694*4, (12900+51000-1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032-694*3, (12900+51000-1400*3)*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032-694*2, (12900+51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032-694*1, (12900+51000-1400*1)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032-694*4, (12900+51000-1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032-694*3, (12900+51000-1400*3)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032-694*2, (12900+51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032-694*1, (12900+51000-1400*1)*0.70, useGridCharging=1), verbose=options.verbose )
 
     # NEM 3.0 payback: 9.01yrs 21 panels, 14032kWh, 2 aPower2 batteries, YearlyPGE=$1251, $44730 cost after rebate
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032-694*0, (12900+51000-1400*0)*0.70, useGridCharging=1), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032+694*4, (12900+51000+1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032-694*0, (12900+51000-1400*0)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032+694*4, (12900+51000+1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
     # SystemCost=$54530, YrlyPgeCost=$605, PaybkYrs=9.42, NewSolar=20972kWh, Battery=30kWh
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 30.0,16, 14032+694*10, (12900+51000+1400*10)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032+694*10, (12900+51000+1400*10)*0.70, useGridCharging=1), verbose=options.verbose )
     # SystemCost=$63560, YrlyPgeCost=$429, PaybkYrs=10.25, NewSolar=20972kWh, Battery=45kWh
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'E-ELEC', '3.0', 45.0,24, 14032+694*10, (12900*2+51000+1400*10)*0.70, useGridCharging=1), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 45.0,24, 14032+694*10, (12900*2+51000+1400*10)*0.70, useGridCharging=1), verbose=options.verbose )
 
     # Get handle for Tkinter root window and hide it
     #global root
