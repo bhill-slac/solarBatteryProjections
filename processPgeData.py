@@ -1109,7 +1109,7 @@ def readVueData( vueDataFile, verbose=False ):
 def process_options(argv):
     if argv is None:
        argv = sys.argv[1:]
-    desc = 'processPgeData reads PGE data files and analyses them.'
+    desc = 'cmpSolarBatteryOptions reads PGE data files and analyses them.'
     parser = argparse.ArgumentParser( description = desc )
     parser.add_argument( '-f', '--pgeDataFiles', dest='pgeDataFiles', action='append', \
             help='Read PGE Data File -f pgeDataFile1.csv [-f pgeDataFile2.csv]' )
@@ -1155,8 +1155,8 @@ def main(argv=None):
     myHomeSolar.ProcessDataFiles( pgeData, vueData, options.verbose )
 
     print("Current PGE Rate Plan Costs")
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'None', 'E-TOU-D', '1.0', 0, 0, 0 ), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'None', 'E-TOU-C', '1.0', 0, 0, 0 ), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'None', 'E-TOU-D', '1.0', 0, 0, 0, 0 ), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'None', 'E-TOU-C', '1.0', 0, 0, 0, 0 ), verbose=options.verbose )
     print("\nNEM 1.0 options")
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Tesla', 'E-ELEC', '1.0', 13.5, 0, 14000 ), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Tesla', 'E-ELEC', '1.0', 13.5, 5600, 22000 ), verbose=options.verbose )
@@ -1177,7 +1177,7 @@ def main(argv=None):
 
     # Enphase Inverters w/ 3 Enphase 5P Batteries
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14247, 54900*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 12871+672*-0, (49500+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 12871+672*-0, (49500+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
     myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14215+672*-0, (52000+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 12871+687*2, (49500+1400*2)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
     # Best NEM 1.0 payback: 7.21yrs 23 panels, 12859 kWh, YearlyPGE=$482, $36470 cost after rebate
@@ -1188,7 +1188,7 @@ def main(argv=None):
     # Best NEM 3.0 payback: 9.56yrs 16 panels, 9389 kWh, YearlyPGE=$2599, $31570 cost after rebate
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14247+694*-7, (54900+1400*-7)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14247+694*-2, (54900+1400*-2)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 12871+672*-0, (49500+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 12871+672*-0, (49500+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
     myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14215+672*-0, (52000+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14247+694*-6, (54900+1400*-6)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
 
