@@ -6,7 +6,7 @@ import calendar
 import datetime
 import dateutil
 from datetime import timedelta
-import IPython
+#import IPython
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
