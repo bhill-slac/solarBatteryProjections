@@ -995,7 +995,7 @@ class   HomeSolar(tkinter.Tk):
         # vueData also includes an extra entry for midnight on the day after the last export day
         # i.e.  Exporting 1/1/24 to 12/31/24 includes an entry for 1/1/25 00:00
         usage = 0
-        extraHour  = 25
+        extraHour  = datetime.datetime(year=2000,month=1,day=1)
         if len(vueData) > 0:
             extraHour = max(vueData.keys())
         for hourTime, solarProd in vueData.items():
@@ -1005,6 +1005,7 @@ class   HomeSolar(tkinter.Tk):
             # with PGE usage to reflect actual usage w/o solar
             usage = max( 0, usage - solarProd )
             if hourTime < extraHour:
+                # TODO: Do we need to suppress the last vueData entry?
                 self.hourlyData.append( HourlyData( usage, solarProd, hourTime ) )
         if verbose:
             print( 'Processed %u hourly usage and solarProd values.' % len(self.hourlyData) )
