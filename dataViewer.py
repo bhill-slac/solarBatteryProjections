@@ -5,7 +5,8 @@ import argparse
 import calendar
 import datetime
 import dateutil
-from datetime import timedelta
+from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
 #import IPython
 import numpy as np
 import matplotlib
@@ -25,6 +26,11 @@ oldSolarYearlyProd      = 5732      # Based on 2024 solar production measured by
 nonExportLimit          = 5.0       # Based on rating of SMA 5000 Inverter used for NEM 1.0 application
 #maxChargeRate           = 5.0       # Tesla Powerwall 3 has 5kW charge rate.  Franklin aPower is 8kW.
 
+try:
+    local_tz = ZoneInfo("localtime")
+except Exception as e:
+    local_tz = ZoneInfo("America/Los_Angeles")
+
 # Minumum daily PGE charge if we don't use at least accrue at least that much in grid import charges
 pgeMinDailyDeliveryCharge = 0.39167 # Dollars, approx $12 per month
 
@@ -32,9 +38,9 @@ enphaseChargedLabel    = 'Stored in batteries (Wh)'
 enphaseConsumedLabel   = 'Energy Consumed (Wh)'
 enphaseDateLabel       = 'Date/Time'
 enphaseDischargedLabel = 'Discharged from batteries (Wh)'
-enphaseExportedLabel   = 'Exported to Grid (Wh)'
+enphaseExportLabel     = 'Exported to Grid (Wh)'
 enphaseGeneratorLabel  = 'Consumed From Generator (Wh)'
-enphaseImportedLabel   = 'Imported from Grid (Wh)'
+enphaseImportLabel     = 'Imported from Grid (Wh)'
 enphaseSolarLabel      = 'Energy Produced (Wh)'
 
 vueDateLabel  = 'Time Bucket (America/Los_Angeles)'
@@ -104,26 +110,26 @@ matplotlib.use('TkAgg')
 
 def select_nextDay():
     global SelectedDay, myHomeSolar
-    SelectedDay = SelectedDay + datetime.timedelta(days=1)
+    SelectedDay = SelectedDay + timedelta(days=1)
     myHomeSolar.PlotOptions()
 
 def select_prevDay():
     global SelectedDay, myHomeSolar
-    SelectedDay = SelectedDay - datetime.timedelta(days=1)
+    SelectedDay = SelectedDay - timedelta(days=1)
     myHomeSolar.PlotOptions()
 
 def select_nextMonth():
     global SelectedDay, myHomeSolar
-    SelectedDay = datetime.datetime( year=SelectedDay.year,
-                                     month=min(12,SelectedDay.month + 1),
-                                     day=SelectedDay.day )
+    SelectedDay = datetime( year=SelectedDay.year,
+                            month=min(12,SelectedDay.month + 1),
+                            day=SelectedDay.day )
     myHomeSolar.PlotOptions()
 
 def select_prevMonth():
     global SelectedDay, myHomeSolar
-    SelectedDay = datetime.datetime( year=SelectedDay.year,
-                                     month=max(1,SelectedDay.month - 1),
-                                     day=SelectedDay.day )
+    SelectedDay = datetime( year=SelectedDay.year,
+                            month=max(1,SelectedDay.month - 1),
+                            day=SelectedDay.day )
     myHomeSolar.PlotOptions()
 
 def select_date():
@@ -131,7 +137,7 @@ def select_date():
         global SelectedDay
         SelectedDay = date
         print( f"SelectedDay={SelectedDay:%b %d, %Y}" )
-        #ax.set_xlim(date, date + datetime.timedelta(days=1))
+        #ax.set_xlim(date, date + timedelta(days=1))
         myHomeSolar.PlotOptions()
         #plt.draw()
         top.destroy()
@@ -249,7 +255,7 @@ class EnergyData:
                 enphaseBattery=None, enphaseGenerator=None,
                 enphaseCharged=None, enphaseDisCharged=None,
                 gridCharging=None, newExcess=None, oldExcess=None ):
-        self.TimeOfDay  = datetime.datetime(year=2000,month=1,day=1) if time == None else time
+        self.TimeOfDay  = datetime(year=2000,month=1,day=1) if time == None else time
         self.Duration   = time.time(hour=1,minute=0,second=0) if time == None else time
         self.Battery       = enphaseBattery    # Battery charge kWh
         self.Charged       = enphaseCharged    # Battery charging this hour kWh
@@ -262,7 +268,7 @@ class EnergyData:
         self.EnphaseExport = enphaseExport     # kWh
         self.PgeImport     = pgeImport         # Pge Grid import kWh
         self.PgeExport     = pgeExport         # Pge Grid Export kWh
-        self.Cost          = pgeCost           # $
+        self.PgeCost       = pgeCost           # $
         self.VueImport     = vueImport         # Vue Grid import kWh
         self.VueExport     = vueExport         # Vue Grid Export kWh
         self.GridCharging  = gridCharging      # Grid Charging kWh
@@ -297,17 +303,17 @@ class EnergyData:
             output += f", NewExcess={self.NewExcess:>6.2f}"
         if self.OldExcess is not None:
             output += f", OldExcess={self.OldExcess:>6.2f}"
-        if self.Cost is not None:
-            output += f", Cost=${self.Cost:>6.2f}"
+        if self.PgeCost is not None:
+            output += f", Cost=${self.PgeCost:>6.2f}"
         return output
 
 def getEarliestDateTime( items ):
-    listItems = list(items)
-    return min(listItems, key=lambda item: item.TimeOfDay)
+    listItems = list(items.values())
+    return min(listItems, key=lambda item: item.TimeOfDay).TimeOfDay
 
 def getLatestDateTime( items ):
-    listItems = list(items)
-    return max(listItems, key=lambda item: item.TimeOfDay)
+    listItems = list(items.values())
+    return max(listItems, key=lambda item: item.TimeOfDay).TimeOfDay
 
 
 # class HourlyProj
@@ -318,7 +324,7 @@ class HourlyProj:
     """
     def __init__( self, time=None, grid=0, usage=0, battery=0, batteryUsed=0, charging=0, gridCharging=0, newSolar=0, oldSolar=0, newExcess=0, oldExcess=0, export=0, cost=0 ):
         # Keep these values as the input conditions
-        self.TimeOfDay = datetime.datetime(year=2000,month=1,day=1) if time == None else time
+        self.TimeOfDay = datetime(year=2000,month=1,day=1) if time == None else time
         self.Usage     = usage     # kWh
         self.NewSolar  = newSolar  # kWh
         self.OldSolar  = oldSolar  # kWh
@@ -794,8 +800,8 @@ class Option( tkinter.Toplevel ):
         self.canvas.draw()
 
 def DebugPeakVsOffPeakTimes( timeOfDay ):
-    debugWinter2Summer = datetime.datetime( year=timeOfDay.year, month=6, day = 1 )
-    debugSummer2Winter = datetime.datetime( year=timeOfDay.year, month=10, day = 1 )
+    debugWinter2Summer = datetime( year=timeOfDay.year, month=6, day = 1 )
+    debugSummer2Winter = datetime( year=timeOfDay.year, month=10, day = 1 )
     debugInterval = timedelta(days=1) 
     if (   abs(timeOfDay - debugSummer2Winter) <= debugInterval
         or abs(timeOfDay - debugWinter2Summer) <= debugInterval ):
@@ -849,9 +855,9 @@ class HomeSolar(tkinter.Tk):
         diagTotals = HourlyProj()
         diagDay  = HourlyProj()
         verboseDay = False
-        SelectedDay = datetime.datetime(    year=earliestDateTime.year,
-                                            month=earliestDateTime.month,
-                                            day=earliestDateTime.day )
+        SelectedDay = datetime( year=earliestDateTime.year,
+                                month=earliestDateTime.month,
+                                day=earliestDateTime.day )
         priorDay = 0
         priorDayPeakUsage = 0
         priorDayPartialPeakUsage = 0
@@ -1059,6 +1065,9 @@ class HomeSolar(tkinter.Tk):
         print( f"{calendar.month_name[diagMonth]}     Totals: {diagMonthTotals}" )
 
     def CombineDataFiles( self, pgeData, enphaseData, vueData, verbose = False ):
+        if verbose:
+            print( "CombineDataFiles: %u pgeData, %u enphaseData, and %u vueData items" %
+                    ( len(pgeData), len(enphaseData), len(vueData) ) )
         # Note: Both data files have 23 entries for start of DST, 3/10/24
         # pgeData has 24 entries for DST, 11/3/24
         # vueData has 25 entries, but we add 1 min to the duplicate 1:00 am as
@@ -1066,27 +1075,45 @@ class HomeSolar(tkinter.Tk):
         # vueData also includes an extra entry for midnight on the day after the last export day
         # i.e.  Exporting 1/1/24 to 12/31/24 includes an entry for 1/1/25 00:00
         usage = 0
-        extraHour  = datetime.datetime(year=2000,month=1,day=1)
+        extraHour  = datetime(year=2000,month=1,day=1)
         if len(vueData) > 0:
             extraHour = vueData[-1].TimeOfDay.hour
         # Start w/ vueData as it has the most attributes.
         # vueData has one attribute for each monitored circuit in both main panel and subpanel 
         for d in vueData:
             self.energyData[d.TimeOfDay] = d
-        
+ 
         # Add pgeData
         for d in pgeData:
             if d.TimeOfDay in self.energyData:
-                self.energyData[d.TimeOfDay].pgeInput = d.pgeInput
-                self.energyData[d.TimeOfDay].pgeOutput = d.pgeOutput
-                self.energyData[d.TimeOfDay].pgeCost = d.pgeCost
-            if d.TimeOfDay in pgeData:
-                usage = pgeData[hourTime]
-            # solarProd is negative and needs to be combined
-            # with PGE usage to reflect actual usage w/o solar
-            usage = max( 0, usage - solarProd )
-            if hourTime < extraHour:
-                self.energyData[hourTime] = EnergyData( usage, solarProd, hourTime )
+                self.energyData[d.TimeOfDay].PgeImport  = d.PgeImport
+                self.energyData[d.TimeOfDay].PgeExport  = d.PgeExport
+                self.energyData[d.TimeOfDay].PgeCost    = d.PgeCost
+            else:
+                self.energyData[d.TimeOfDay] = EnergyData(time=d.TimeOfDay, duration=d.Duration,
+                                            pgeImport=d.PgeImport, pgeExport=d.PgeExport, pgeCost=d.PgeCost)
+ 
+        # Add enphaseData
+        for d in enphaseData:
+            if d.TimeOfDay in self.energyData:
+                self.energyData[d.TimeOfDay].EnphaseCharged=d.Charged
+                self.energyData[d.TimeOfDay].EnphaseConsumed=d.Consumed
+                self.energyData[d.TimeOfDay].EnphaseDisCharged=d.DisCharged
+                self.energyData[d.TimeOfDay].EnphaseProduced=d.NewSolar
+                self.energyData[d.TimeOfDay].EnphaseGenerator=d.Generator
+                self.energyData[d.TimeOfDay].EnphaseImport=d.EnphaseImport
+                self.energyData[d.TimeOfDay].EnphaseExport=d.EnphaseExport
+            else:
+                newData = EnergyData(time=d.TimeOfDay, duration=d.Duration,
+                                    enphaseCharged=d.Charged,
+                                    enphaseConsumed=d.Consumed,
+                                    enphaseDisCharged=d.DisCharged,
+                                    enphaseProduced=d.NewSolar,
+                                    enphaseGenerator=d.Generator,
+                                    enphaseImport=d.EnphaseImport,
+                                    enphaseExport=d.EnphaseExport)
+                self.energyData[d.TimeOfDay] = newData
+
         if verbose:
             earliestDateTime = getEarliestDateTime( self.energyData )
             latestDateTime = getLatestDateTime( self.energyData )
@@ -1135,7 +1162,7 @@ def readPgeData( pgeDataFile, verbose=False ):
     pgeImport = 0
     pgeExport = 0
     pgeCost = 0
-    rowTime = datetime.datetime.now()
+    rowTime = datetime.now()
     for row in csv_reader:
         numRows  = numRows+1
         rowDate  = dateutil.parser.parse( row['DATE'] )
@@ -1149,10 +1176,12 @@ def readPgeData( pgeDataFile, verbose=False ):
             pgeImport = float( row['IMPORT (kWh)'])
             pgeExport = float( row['EXPORT (kWh)'])
 
-        rowTime  = rowDate + datetime.timedelta(hours=rowStart.hour, minutes=rowStart.minute)
-        duration = rowEnd + datetime.timedelta(minutes=1) - rowStart
+        rowTime  = rowDate + timedelta(hours=rowStart.hour, minutes=rowStart.minute)
+        if rowTime.tzinfo is None:
+            rowTime = rowTime.replace(tzinfo=local_tz)
+        duration = rowEnd + timedelta(minutes=1) - rowStart
         if rowTime in newPgeData:
-            rowTime = rowTime + datetime.timedelta(minutes=1)
+            rowTime = rowTime + timedelta(minutes=1)
         newPgeData.append( EnergyData(time=rowTime, duration=duration, pgeImport=pgeImport, pgeExport=pgeExport, pgeCost=pgeCost) )
         if verbose and len(newPgeData) <= 1:
             print( "%s: %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), pgeImport ) )
@@ -1184,10 +1213,12 @@ def readVueData( vueDataFile, verbose=False ):
     csv_reader = csv.DictReader(in_file)
     numRows = 0
     solarOutput = 0
-    rowTime  = datetime.datetime.now()
-    duration = datetime.timedelta(minutes=15)
+    rowTime  = datetime.now()
+    duration = timedelta(minutes=15)
     for row in csv_reader:
         rowTime = dateutil.parser.parse( row[vueDateLabel] )
+        if rowTime.tzinfo is None:
+            rowTime = rowTime.replace(tzinfo=local_tz)
         if numRows == 1:
             duration = rowTime - newVueData[0].TimeOfDay
             newVueData[0].duration = duration
@@ -1195,7 +1226,7 @@ def readVueData( vueDataFile, verbose=False ):
             solarOutput = float( row[vueSolarLabel])
         # TODO: Handle dups
         #if rowTime in newVueData:
-        #   rowTime = rowTime + datetime.timedelta(minutes=1)
+        #   rowTime = rowTime + timedelta(minutes=1)
         newVueData.append( EnergyData(time=rowTime, duration=duration, vueSolar=solarOutput ) )
         if verbose and len(newVueData) <= 1:
             print( "%s: %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), solarOutput ) )
@@ -1227,26 +1258,54 @@ def readEnphaseData( enphaseDataFile, verbose=False ):
 
     csv_reader = csv.DictReader(in_file)
     numRows = 0
-    rowTime  = datetime.datetime.now()
-    duration = datetime.timedelta(minutes=15)
-    solarOutput = 0
+    rowTime  = datetime.now()
+    duration = timedelta(minutes=15)
+    enphaseProduced = 0
+    enphaseCharged = 0
+    enphaseDisCharged = 0
+    enphaseConsumed = 0
+    enphaseExport = 0
+    enphaseGenerator = 0
+    enphaseImport = 0
     for row in csv_reader:
         rowTime = dateutil.parser.parse( row[enphaseDateLabel] )
+        if rowTime.tzinfo is None:
+            rowTime = rowTime.replace(tzinfo=local_tz)
         if numRows == 1:
             duration = rowTime - newEnphaseData[0].TimeOfDay
-            newEnphaseData[0].duration = duration
         if enphaseSolarLabel in csv_reader.fieldnames:
-            solarOutput = float( row[enphaseSolarLabel])
+            enphaseProduced = float(row[enphaseSolarLabel])
+        if enphaseChargedLabel in csv_reader.fieldnames:
+            enphaseCharged = float(row[enphaseChargedLabel])
+        if enphaseConsumedLabel in csv_reader.fieldnames:
+            enphaseConsumed = float(row[enphaseConsumedLabel])
+        if enphaseDischargedLabel in csv_reader.fieldnames:
+            enphaseDischarged = float(row[enphaseDischargedLabel])
+        if enphaseExportLabel in csv_reader.fieldnames:
+            enphaseExport = float(row[enphaseExportLabel])
+        if enphaseGeneratorLabel in csv_reader.fieldnames:
+            enphaseGenerator = float(row[enphaseGeneratorLabel])
+        if enphaseImportLabel in csv_reader.fieldnames:
+            enphaseImport = float(row[enphaseImportLabel])
+
         # TODO: Handle dups
         #if rowTime in newEnphaseData:
-        #    rowTime = rowTime + datetime.timedelta(minutes=1)
-        newEnphaseData.append( EnergyData(time=rowTime, duration=duration, enphaseProduced=solarOutput ) )
+        #    rowTime = rowTime + timedelta(minutes=1)
+        newData = EnergyData(time=rowTime, duration=duration,
+                    enphaseCharged=enphaseCharged,
+                    enphaseConsumed=enphaseConsumed,
+                    enphaseDisCharged=enphaseDisCharged,
+                    enphaseExport=enphaseExport,
+                    enphaseGenerator=enphaseGenerator,
+                    enphaseImport=enphaseImport,
+                    enphaseProduced=enphaseProduced)
+        newEnphaseData.append( newData )
         if verbose and len(newEnphaseData) <= 1:
-            print( "%s: %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), solarOutput ) )
+            print( "%s: Consumed %.2f, Produced %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), enphaseConsumed, enphaseProduced ) )
         numRows = numRows+1
 
     if verbose:
-        print( "%s: %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), solarOutput ) )
+        print( "%s: Consumed %.2f, Produced %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), enphaseConsumed, enphaseProduced ) )
     return newEnphaseData
 
 def process_options(argv):
