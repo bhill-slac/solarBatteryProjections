@@ -5,7 +5,9 @@ import argparse
 import calendar
 import datetime
 import dateutil
-from datetime import timedelta
+import pprint
+from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
 #import IPython
 import numpy as np
 import matplotlib
@@ -25,13 +27,28 @@ oldSolarYearlyProd      = 5732      # Based on 2024 solar production measured by
 nonExportLimit          = 5.0       # Based on rating of SMA 5000 Inverter used for NEM 1.0 application
 #maxChargeRate           = 5.0       # Tesla Powerwall 3 has 5kW charge rate.  Franklin aPower is 8kW.
 
+try:
+    local_tz = ZoneInfo("localtime")
+except Exception as e:
+    local_tz = ZoneInfo("America/Los_Angeles")
+
 # Minumum daily PGE charge if we don't use at least accrue at least that much in grid import charges
 pgeMinDailyDeliveryCharge = 0.39167 # Dollars, approx $12 per month
+
+enphaseChargedLabel    = 'Stored in batteries (Wh)'
+enphaseConsumedLabel   = 'Energy Consumed (Wh)'
+enphaseDateLabel       = 'Date/Time'
+enphaseDischargedLabel = 'Discharged from batteries (Wh)'
+enphaseExportLabel     = 'Exported to Grid (Wh)'
+enphaseGeneratorLabel  = 'Consumed From Generator (Wh)'
+enphaseImportLabel     = 'Imported from Grid (Wh)'
+enphaseSolarLabel      = 'Energy Produced (Wh)'
 
 vueDateLabel  = 'Time Bucket (America/Los_Angeles)'
 vueSolarLabel = 'Main panel-Solar/Generation-Solar inverter (kWhs)'
 pgeData = {}
 vueData = {}
+enphaseData = {}
 
 # PGE Baseline Info 2024
 # https://www.pge.com/en/account/rate-plans/how-rates-work/baseline-allowance.html#tabs-59f0a2f599-item-f6f6231a48-tab
@@ -94,26 +111,26 @@ matplotlib.use('TkAgg')
 
 def select_nextDay():
     global SelectedDay, myHomeSolar
-    SelectedDay = SelectedDay + datetime.timedelta(days=1)
+    SelectedDay = SelectedDay + timedelta(days=1)
     myHomeSolar.PlotOptions()
 
 def select_prevDay():
     global SelectedDay, myHomeSolar
-    SelectedDay = SelectedDay - datetime.timedelta(days=1)
+    SelectedDay = SelectedDay - timedelta(days=1)
     myHomeSolar.PlotOptions()
 
 def select_nextMonth():
     global SelectedDay, myHomeSolar
-    SelectedDay = datetime.datetime( year=SelectedDay.year,
-                                     month=min(12,SelectedDay.month + 1),
-                                     day=SelectedDay.day )
+    SelectedDay = datetime( year=SelectedDay.year,
+                            month=min(12,SelectedDay.month + 1),
+                            day=SelectedDay.day )
     myHomeSolar.PlotOptions()
 
 def select_prevMonth():
     global SelectedDay, myHomeSolar
-    SelectedDay = datetime.datetime( year=SelectedDay.year,
-                                     month=max(1,SelectedDay.month - 1),
-                                     day=SelectedDay.day )
+    SelectedDay = datetime( year=SelectedDay.year,
+                            month=max(1,SelectedDay.month - 1),
+                            day=SelectedDay.day )
     myHomeSolar.PlotOptions()
 
 def select_date():
@@ -121,7 +138,7 @@ def select_date():
         global SelectedDay
         SelectedDay = date
         print( f"SelectedDay={SelectedDay:%b %d, %Y}" )
-        #ax.set_xlim(date, date + datetime.timedelta(days=1))
+        #ax.set_xlim(date, date + timedelta(days=1))
         myHomeSolar.PlotOptions()
         #plt.draw()
         top.destroy()
@@ -180,11 +197,20 @@ class HourlyData:
     def __init__( self ):
         self.Usage     = 0
         self.SolarProd = 0
-        self.TimeOfDay = datetime.now()
+        self.TimeOfDay = now()
     def __init__( self, usage, solarProd, timeOfDay ):
         self.Usage     = usage
         self.SolarProd = solarProd
         self.TimeOfDay = timeOfDay
+    def __str__( self ):
+        if self.TimeOfDay is None:
+            return f"Undefined TimeOfDay"
+        output = f"{self.TimeOfDay} HourlyData: "
+        if self.Usage is not None:
+            output += f", Usage={self.Usage:>6.2f}"
+        if self.SolarProd is not None:
+            output += f", SolarProd={self.SolarProd:>6.2f}"
+        return output
 
 def isSummerTime( timeOfDay ):
     # Summer is June through end of Sept
@@ -234,15 +260,99 @@ def isWinterOffPeakTime( timeOfDay, ratePlan ):
         return isOffPeakTime( timeOfDay, ratePlan )
     return False
 
+# class EnergyData
+class EnergyData:
+    """
+    Used for representation of solar, battery and other energy data for a specific period of time.
+    Includes PGE, enPhase, and Vue monitoring data including consumption, solar production,
+    charging, grid import, grid export, excess solar, etc.
+    """
+    def __init__( self, time=None, durMinutes=None,
+                pgeImport=None, pgeExport=None, cost=None,
+                vueImport=None, vueExport=None, vueSolar=None,
+                enphaseImport=None, enphaseExport=None,
+                enphaseProduced=None, enphaseConsumed=None,
+                enphaseBattery=None, enphaseGenerator=None,
+                enphaseCharged=None, enphaseDisCharged=None,
+                gridCharging=None, newExcess=None, oldExcess=None ):
+        self.TimeOfDay  = datetime(year=2000,month=1,day=1) if time == None else time
+        self.DurMinutes = 60 if durMinutes == None else durMinutes
+        self.Battery       = enphaseBattery    # Battery charge kWh
+        self.Charged       = enphaseCharged    # Battery charging this hour kWh
+        self.DisCharged    = enphaseDisCharged # Battery used this hour kWh
+        self.Consumed      = enphaseConsumed   # kWh
+        self.OldSolar      = vueSolar          # kWh
+        self.NewSolar      = enphaseProduced   # kWh
+        self.Generator     = enphaseGenerator  # kWh
+        self.EnphaseImport = enphaseImport     # kWh
+        self.EnphaseExport = enphaseExport     # kWh
+        self.PgeImport     = pgeImport         # Pge Grid import kWh
+        self.PgeExport     = pgeExport         # Pge Grid Export kWh
+        self.Cost          = cost              # $
+        self.VueImport     = vueImport         # Vue Grid import kWh
+        self.VueExport     = vueExport         # Vue Grid Export kWh
+        self.Grid          = pgeImport         # Grid import kWh
+        self.Export        = pgeExport         # Grid Export kWh
+        self.GridCharging  = gridCharging      # Grid Charging kWh
+        self.NewExcess     = newExcess         # Excess New Solar kWh
+        self.OldExcess     = oldExcess         # Excess Old Solar kWh
+
+    def __str__( self ):
+        if self.TimeOfDay is None:
+            return f"Undefined TimeOfDay"
+        output = f"{self.TimeOfDay} EnergyData: "
+        if self.DurMinutes is not None:
+            output += f"Dur={self.DurMinutes}"
+        if self.Consumed is not None:
+            output += f", Consumed={self.Consumed:>6.2f}"
+        if self.NewSolar is not None:
+            output += f", NewSolar={self.NewSolar:>6.2f}"
+        if self.OldSolar is not None:
+            output += f", OldSolar={self.OldSolar:>6.2f}"
+        if self.PgeImport is not None:
+            output += f", PgeImport={self.PgeImport:>6.2f}"
+        if self.PgeExport is not None:
+            output += f", PgeExport={self.PgeExport:>6.2f}"
+        if self.Generator is not None:
+            output += f", Generator={self.Generator:>6.2f}"
+        if self.EnphaseImport is not None:
+            output += f", EnphaseImport={self.EnphaseImport:>6.2f}"
+        if self.EnphaseExport is not None:
+            output += f", EnphaseExport={self.EnphaseExport:>6.2f}"
+        if self.Charged is not None:
+            output += f", Charged={self.Charged:>6.2f}"
+        if self.DisCharged is not None:
+            output += f", DisCharged={self.DisCharged:>6.2f}"
+        if self.GridCharging is not None:
+            output += f", GridCharging={self.GridCharging:>6.2f}"
+        if self.Battery is not None:
+            output += f", Battery={self.Battery:>6.2f}"
+        if self.NewExcess is not None:
+            output += f", NewExcess={self.NewExcess:>6.2f}"
+        if self.OldExcess is not None:
+            output += f", OldExcess={self.OldExcess:>6.2f}"
+        if self.Cost is not None:
+            output += f", Cost=${self.Cost:>6.2f}"
+        return output
+
+def getEarliestDateTime( items ):
+    listItems = list(items.values())
+    return min(listItems, key=lambda item: item.TimeOfDay).TimeOfDay
+
+def getLatestDateTime( items ):
+    listItems = list(items.values())
+    return max(listItems, key=lambda item: item.TimeOfDay).TimeOfDay
+
+
 # class HourlyProj
 class HourlyProj:
     """
     Used to compute hour by hour projections of grid vs solar vs battery status
     Includes usage, solar production, charging, export, excess solar, etc.
     """
-    def __init__( self, time=None, grid=0, usage=0, battery=0, batteryUsed=0, charging=0, gridCharging=0, newSolar=0, oldSolar=0, newExcess=0, oldExcess=0, export=0, cost=0 ):
+    def __init__( self, time=None, grid=0, usage=0, battery=0, batteryUsed=0, charged=0, gridCharging=0, newSolar=0, oldSolar=0, newExcess=0, oldExcess=0, export=0, cost=0 ):
         # Keep these values as the input conditions
-        self.TimeOfDay = datetime.datetime(year=2000,month=1,day=1) if time == None else time
+        self.TimeOfDay = datetime(year=2000,month=1,day=1) if time == None else time
         self.Usage     = usage     # kWh
         self.NewSolar  = newSolar  # kWh
         self.OldSolar  = oldSolar  # kWh
@@ -251,26 +361,50 @@ class HourlyProj:
         self.Export    = export    # Grid Export kWh
         self.Battery   = battery   # Hourly Battery charge kWh
         self.BatteryUsed= batteryUsed # Battery used this hour kWh
-        self.Charging  = charging  # Charging kWh
+        self.Charged  = charged  # Battery Charging kWh
         self.GridCharging = gridCharging  # Grid Charging kWh
         self.NewExcess = newExcess # Excess New Solar kWh
         self.OldExcess = oldExcess # Excess Old Solar kWh
         self.Cost      = cost      # $
 
     def __str__( self ):
-        #return f"{self.TimeOfDay}: Cost={self.Cost:>6.2f}, Grid={self.Grid:>6.2f}, Charging={self.Charging:>6.2f}, GridCharging={self.GridCharging:>6.2f}, Battery={self.Battery:>6.2f}, Export={self.Export:>6.2f}" 
-        return f"{self.TimeOfDay}: Usage={self.Usage:>6.2f}, NewSolar={self.NewSolar:>6.2f}, OldSolar={self.OldSolar:>6.2f}, Grid={self.Grid:>6.2f}, Export={self.Export:>6.2f}, Charging={self.Charging:>6.2f}, GridCharging={self.GridCharging:>6.2f}, Battery={self.Battery:>6.2f}, BatteryUsed={self.BatteryUsed:>6.2f}, NewExcess={self.NewExcess:>6.2f}, OldExcess={self.OldExcess:>6.2f}, Cost=${self.Cost:>6.2f}"
+        if self.TimeOfDay is None:
+            return f"Undefined TimeOfDay"
+        output = f"{self.TimeOfDay} HourlyProj: "
+        if self.Usage is not None:
+            output += f", Usage={self.Usage:>6.2f}"
+        if self.NewSolar is not None:
+            output += f", NewSolar={self.NewSolar:>6.2f}"
+        if self.OldSolar is not None:
+            output += f", OldSolar={self.OldSolar:>6.2f}"
+        if self.Grid is not None:
+            output += f", Grid={self.Grid:>6.2f}"
+        if self.Export is not None:
+            output += f", Export={self.Export:>6.2f}"
+        if self.Charged is not None:
+            output += f", Charged={self.Charged:>6.2f}"
+        if self.BatteryUsed is not None:
+            output += f", BatteryUsed={self.BatteryUsed:>6.2f}"
+        if self.GridCharging is not None:
+            output += f", GridCharging={self.GridCharging:>6.2f}"
+        if self.Battery is not None:
+            output += f", Battery={self.Battery:>6.2f}"
+        if self.NewExcess is not None:
+            output += f", NewExcess={self.NewExcess:>6.2f}"
+            output += f", OldExcess={self.OldExcess:>6.2f}"
+            output += f", Cost=${self.Cost:>6.2f}"
+        return output
 
     # Arithmetic operators
     def __add__( self, other ):
         # Note: Battery does not get added
-        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging, gridCharging=self.GridCharging,
+        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charged=self.Charged, gridCharging=self.GridCharging,
                             newExcess=self.NewExcess, oldExcess=self.OldExcess,
                             newSolar=self.NewSolar, oldSolar=self.OldSolar,
                             batteryUsed=self.BatteryUsed, export=self.Export, cost=self.Cost )
         result.Grid        += other.Grid
         result.Usage       += other.Usage
-        result.Charging    += other.Charging
+        result.Charged     += other.Charged
         result.GridCharging+= other.GridCharging
         result.NewExcess   += other.NewExcess
         result.OldExcess   += other.OldExcess
@@ -283,12 +417,12 @@ class HourlyProj:
         return result
     def __truediv__( self, other ):
         # Note: Battery and TimeOfDay do not get modified
-        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging, gridCharging=self.GridCharging,
+        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charged=self.Charged, gridCharging=self.GridCharging,
                             newExcess=self.NewExcess, oldExcess=self.OldExcess, newSolar=self.NewSolar, oldSolar=self.OldSolar,
                             batteryUsed=self.BatteryUsed, export=self.Export, cost=self.Cost )
         result.Grid     /= other
         result.Usage    /= other
-        result.Charging /= other
+        result.Charged /= other
         result.GridCharging /= other
         result.NewExcess/= other
         result.OldExcess/= other
@@ -300,12 +434,12 @@ class HourlyProj:
         return result
     def __mul__( self, other ):
         # Note: Battery and TimeOfDay do not get modified
-        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charging=self.Charging, gridCharging=self.GridCharging,
+        result = HourlyProj( time=self.TimeOfDay, grid=self.Grid, usage=self.Usage, battery=self.Battery, charged=self.Charged, gridCharging=self.GridCharging,
                             newExcess=self.NewExcess, oldExcess=self.OldExcess, newSolar=self.NewSolar, oldSolar=self.OldSolar,
                             batteryUsed=self.BatteryUsed, export=self.Export, cost=self.Cost )
         result.Grid     *= other
         result.Usage    *= other
-        result.Charging *= other
+        result.Charged *= other
         result.GridCharging *= other
         result.NewExcess*= other
         result.OldExcess*= other
@@ -332,10 +466,10 @@ class HourlyProj:
     def ApplyGridToBattery( self, desiredCharge, options ):
         if self.Battery >= options.MaxBattery:
             return
-        availCharge = max(0, options.MaxChargeRate - self.Charging)
+        availCharge = max(0, options.MaxChargeRate - self.Charged)
         newCharge = min( desiredCharge, availCharge, options.MaxBattery - self.Battery )
         self.Battery = min( self.Battery + newCharge, options.MaxBattery )
-        self.Charging += newCharge
+        self.Charged += newCharge
         self.GridCharging += newCharge
         self.Grid += newCharge / (options.Efficiency/100)
         if self.Grid < 0:
@@ -349,7 +483,7 @@ class HourlyProj:
         availCharge = self.NewExcess * options.Efficiency / 100
         newCharge = min( options.MaxChargeRate, availCharge, options.MaxBattery - self.Battery )
         self.Battery = min( self.Battery + newCharge, options.MaxBattery )
-        self.Charging += newCharge
+        self.Charged += newCharge
         self.NewExcess = max( 0, self.NewExcess - newCharge / (options.Efficiency/100) )
  
     def ApplyOldSolarToBattery( self, options ):
@@ -360,7 +494,7 @@ class HourlyProj:
         availCharge = self.OldExcess * options.Efficiency / 100
         newCharge = min( options.MaxChargeRate, availCharge, options.MaxBattery - self.Battery )
         self.Battery = min( self.Battery + newCharge, options.MaxBattery )
-        self.Charging += newCharge
+        self.Charged += newCharge
         self.OldExcess = max( 0, self.OldExcess - newCharge / (options.Efficiency/100) )
 
     def ApplyOldSolarToGrid( self ):
@@ -519,7 +653,7 @@ class HourlyProj:
 #   Options for home solar projections
 #   opt1 = Option( 'Tesla', 'E-ELEC', '1.0', 13.5, 5, 5600, 32000 )
 class Option( tkinter.Toplevel ):
-    def __init__( self, parent, vendor, ratePlan, nem, maxBattery, maxChargeRate, newSolarProd, systemCost, useGridCharging=0, efficiency=95 ):
+    def __init__( self, parent, vendor, ratePlan, nem, maxBattery, maxChargeRate, newSolarProd, systemCost, useGridCharging=0, efficiency=95, installed=False ):
         super().__init__(parent)
         self.Vendor       = vendor
         self.RatePlan     = ratePlan      # 'E-ELEC' or 'E-TOU-C' or 'E-TOU-D'
@@ -527,10 +661,11 @@ class Option( tkinter.Toplevel ):
         self.MaxBattery   = maxBattery    # kWh
         self.MaxChargeRate= maxChargeRate # kWh
         self.Efficiency   = efficiency    # %
+        self.Installed    = installed     # True or False
         self.UseGridCharging= useGridCharging
         self.NewSolarProd = newSolarProd  # Yearly kWh
         self.SystemCost   = systemCost    # $
-        self.YearlyPgeCost= 0             # $
+        self.YearlyCost   = 0             # $
         self.PaybackYears = 0             # years
         self.TwentyFiveYearSavings = 0    # $
         self.Projections   = []
@@ -561,16 +696,16 @@ class Option( tkinter.Toplevel ):
         self.DailyDataFrame.grid(row=2)
 
     def __str__( self ):
-        return f"RatePlan={self.RatePlan:>7}, NEM={self.NEM}, MaxBattery={self.MaxBattery}kWh, MaxChargeRate={self.MaxChargeRate}kW, Efficiency={self.Efficiency}, NewSolarProd={self.NewSolarProd}kWh\nSystemCost=${self.SystemCost:>6.2f}, YearlyPgeCost=${self.YearlyPgeCost:>6.2f}, PaybackYears={self.PaybackYears:>4.2f} yrs, 25YearSavings=${self.TwentyFiveYearSavings:>.2f}" 
+        return f"RatePlan={self.RatePlan:>7}, NEM={self.NEM}, MaxBattery={self.MaxBattery}kWh, MaxChargeRate={self.MaxChargeRate}kW, Efficiency={self.Efficiency}, NewSolarProd={self.NewSolarProd}kWh\nSystemCost=${self.SystemCost:>6.2f}, YearlyCost=${self.YearlyCost:>6.2f}, PaybackYears={self.PaybackYears:>4.2f} yrs, 25YearSavings=${self.TwentyFiveYearSavings:>.2f}" 
 
     def ComputeYearlyCosts( self ):
         YearlyTotals = HourlyProj(battery=self.MaxBattery)
         for newHour in self.Projections:
             YearlyTotals = YearlyTotals + newHour
-        self.YearlyPgeCost = YearlyTotals.Cost
+        self.YearlyCost = YearlyTotals.Cost
         totalSavings = 0
         estFutureCostAsIs = est2024PgeCost
-        estFutureCostOfOption = self.YearlyPgeCost
+        estFutureCostOfOption = self.YearlyCost
         for year in range(1,26):
             thisYearsSavings = estFutureCostAsIs - estFutureCostOfOption
             totalSavings += thisYearsSavings
@@ -582,7 +717,7 @@ class Option( tkinter.Toplevel ):
         #print( f"Est Yearly PGE cost in 25 years={estFutureCostAsIs:$>6.2f}" )
         #print( f"Est Yearly Option cost in 25 years={estFutureCostOfOption:$>6.2f}" )
         tkinter.Label(self.YearlyDataFrame, text=f"SystemCost=${self.SystemCost:>.0f}", font=self.bold14Font ).grid( row=1, column=0 )
-        tkinter.Label(self.YearlyDataFrame, text=f"YrlyPgeCost=${self.YearlyPgeCost:>.0f}", font=self.bold14Font ).grid( row=1, column=1 )
+        tkinter.Label(self.YearlyDataFrame, text=f"YrlyCost=${self.YearlyCost:>.0f}", font=self.bold14Font ).grid( row=1, column=1 )
         tkinter.Label(self.YearlyDataFrame, text=f"PaybkYrs={self.PaybackYears:>.2f} yrs", font=self.bold14Font ).grid( row=1, column=2 )
         tkinter.Label(self.YearlyDataFrame, text=f"25YrSavings=${self.TwentyFiveYearSavings:>.0f}", font=self.bold14Font ).grid( row=1, column=3 )
         tkinter.Label(self.YearlyDataFrame, text=f"YrlyExcess={YearlyTotals.OldExcess+YearlyTotals.NewExcess:>.0f}kWh", font=self.bold14Font ).grid( row=1, column=4 )
@@ -596,7 +731,7 @@ class Option( tkinter.Toplevel ):
         Export = []
         Battery = []
         batteryUsed = []
-        Charging = []
+        Charged = []
         GridCharging = []
         Excess = []
         Cost = []
@@ -617,7 +752,7 @@ class Option( tkinter.Toplevel ):
             Export.append( hourlyData.Export )
             Battery.append( hourlyData.Battery )
             batteryUsed.append( hourlyData.BatteryUsed )
-            Charging.append( (hourlyData.Charging-hourlyData.GridCharging) / (self.Efficiency/100) )
+            Charged.append( (hourlyData.Charged-hourlyData.GridCharging) / (self.Efficiency/100) )
             GridCharging.append( hourlyData.GridCharging / (self.Efficiency/100) )
             Excess.append( hourlyData.NewExcess + hourlyData.OldExcess )
             Cost.append( hourlyData.Cost )
@@ -628,7 +763,7 @@ class Option( tkinter.Toplevel ):
                     'export':       np.array(Export),
                     'battery':      np.array(Battery),
                     'batteryUsed':  np.array(batteryUsed),
-                    'charging':     np.array(Charging),
+                    'charged':     np.array(Charged),
                     'gridCharging': np.array(GridCharging),
                     'excess':       np.array(Excess),
                     'cost':         np.array(Cost),
@@ -641,8 +776,14 @@ class Option( tkinter.Toplevel ):
         '''
         #print( f"PlotDay: {month}/{day} for Option {self}" )
         data = self.GetDataForDay( month, day )
-        if False:
-            print( f"{month}/{day} data:         {data}" )
+        if True:
+            print( f"{month}/{day} data:" )
+            for k in data.keys():
+                pprint.pprint( f"\n{k}[{len(data[k])}: {data[k]}" )
+        if 'solar' not in data or len(data) == 0 or len(data['solar']) == 0:
+            self.day_ax.set_title(f"No energy data for {month}/{day}",
+                            fontsize=16, fontweight='bold' )
+            return
         if newSolarExportable:
             gridBottom = data['solar'] + data['batteryUsed']
         else:
@@ -659,13 +800,13 @@ class Option( tkinter.Toplevel ):
         self.day_ax.bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=34), align='center', label='Grid', bottom=gridBottom )
         self.day_ax.bar( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', width=timedelta(minutes=34), align='center', label='Solar' )
         #batteryBottom = data['Usage'] - data['batteryUsed']
-        batteryBottom = data['solar'] - data['excess'] - data['export'] - data['charging']
+        batteryBottom = data['solar'] - data['excess'] - data['export'] - data['charged']
         self.day_ax.bar( 'TimeOfDay', 'batteryUsed', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=34), align='center', label='Battery', bottom=batteryBottom)
         #chargingBottom = data['solar'] - data['batteryUsed']
         chargingBottom = data['Usage'] - data['batteryUsed']
-        self.day_ax.bar( 'TimeOfDay', 'charging', data=data, color='xkcd:sky blue', width=timedelta(minutes=28), align='center', label='Charging', bottom=chargingBottom )
-        #gridChargingBottom = data['charging'] - data['gridCharging']
-        gridChargingBottom = data['Usage'] + data['charging'] - (data['gridCharging']/self.Efficiency)
+        self.day_ax.bar( 'TimeOfDay', 'charged', data=data, color='xkcd:sky blue', width=timedelta(minutes=28), align='center', label='Charged', bottom=chargingBottom )
+        #gridChargingBottom = data['charged'] - data['gridCharging']
+        gridChargingBottom = data['Usage'] + data['charged'] - (data['gridCharging']/self.Efficiency)
         self.day_ax.bar( 'TimeOfDay', 'gridCharging', data=data, color='xkcd:electric blue', width=timedelta(minutes=14), align='center', label='GridCharging', bottom=gridChargingBottom )
         exportBottom = data['solar'] - data['excess'] - data['export']
         self.day_ax.bar( 'TimeOfDay', 'export', data=data, color='xkcd:fire engine red', width=timedelta(minutes=14), align='center', label='Export', bottom=exportBottom)
@@ -718,8 +859,8 @@ class Option( tkinter.Toplevel ):
         self.canvas.draw()
 
 def DebugPeakVsOffPeakTimes( timeOfDay ):
-    debugWinter2Summer = datetime.datetime( year=timeOfDay.year, month=6, day = 1 )
-    debugSummer2Winter = datetime.datetime( year=timeOfDay.year, month=10, day = 1 )
+    debugWinter2Summer = datetime( year=timeOfDay.year, month=6, day = 1 )
+    debugSummer2Winter = datetime( year=timeOfDay.year, month=10, day = 1 )
     debugInterval = timedelta(days=1) 
     if (   abs(timeOfDay - debugSummer2Winter) <= debugInterval
         or abs(timeOfDay - debugWinter2Summer) <= debugInterval ):
@@ -772,15 +913,15 @@ class   HomeSolar(tkinter.Tk):
         diagTotals = HourlyProj()
         diagDay  = HourlyProj()
         verboseDay = False
-        SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year,
-                                            month=self.hourlyData[0].TimeOfDay.month,
-                                            day=self.hourlyData[0].TimeOfDay.day )
+        SelectedDay = datetime( year=self.hourlyData[0].TimeOfDay.year,
+                                month=self.hourlyData[0].TimeOfDay.month,
+                                day=self.hourlyData[0].TimeOfDay.day )
         # Nov 25 was a very low solar day
-        #SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=11, day=25 )
-        SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=11, day=22 )
+        #SelectedDay = datetime(    year=self.hourlyData[0].TimeOfDay.year, month=11, day=25 )
+        SelectedDay = datetime(    year=self.hourlyData[0].TimeOfDay.year, month=11, day=22 )
         # Aug 9  was a very high solar day with very very high peak usage
         # Kevin was visiting and cooked dinner, then used spa that evening while we were cooking.
-        #SelectedDay = datetime.datetime(    year=self.hourlyData[0].TimeOfDay.year, month=8, day=9 )
+        #SelectedDay = datetime(    year=self.hourlyData[0].TimeOfDay.year, month=8, day=9 )
         #self.hourlyProj = []
         priorDay = 0
         priorDayPeakUsage = 0
@@ -790,7 +931,7 @@ class   HomeSolar(tkinter.Tk):
         dailyPeakUsage = 0
         dailyPartialPeakUsage = 0
         for data in self.hourlyData:
-            oldSolar = -data.SolarProd
+            oldSolar = float(abs(data.SolarProd or 0))
             if oldSolar < 0.02: oldSolar = 0 # Clean up output by eliminating trivial solar kWh due to CT accuracy limits
             newSolar = oldSolar * (option.NewSolarProd / oldSolarYearlyProd)
 
@@ -825,13 +966,15 @@ class   HomeSolar(tkinter.Tk):
                 if option.NEM == '1.0':
                     # Battery then Solar
                     newHour.ApplyBatteryToGrid( )
-                    newHour.ApplyNewSolarToGrid( )
-                    newHour.ApplyOldSolarToGrid( )
+                    if not option.Installed:
+                        newHour.ApplyNewSolarToGrid( )
+                        newHour.ApplyOldSolarToGrid( )
                 else:
-                    # Use NewSolar first
-                    newHour.ApplyNewSolarToGrid( )
-                    # OldSolar then Battery
-                    newHour.ApplyOldSolarToGrid( )
+                    if not option.Installed:
+                        # Use NewSolar first
+                        newHour.ApplyNewSolarToGrid( )
+                        # OldSolar then Battery
+                        newHour.ApplyOldSolarToGrid( )
                     newHour.ApplyBatteryToGrid( )
             elif isPartialPeakTime( data.TimeOfDay, option.RatePlan ):
                 #
@@ -845,11 +988,13 @@ class   HomeSolar(tkinter.Tk):
                         # so using grid charged battery would be more expensive
                         if isSummerTime(data.TimeOfDay) or ((priorDayGridChargingUsed+diagDay.GridCharging) < 0.2) or newHour.Battery > 3:
                             newHour.ApplyBatteryToGrid( )
-                    newHour.ApplyNewSolarToGrid( )
-                    newHour.ApplyOldSolarToGrid( )
+                    if not option.Installed:
+                        newHour.ApplyNewSolarToGrid( )
+                        newHour.ApplyOldSolarToGrid( )
                 else:
-                    newHour.ApplyNewSolarToGrid( )
-                    newHour.ApplyOldSolarToGrid( )
+                    if not option.Installed:
+                        newHour.ApplyNewSolarToGrid( )
+                        newHour.ApplyOldSolarToGrid( )
                     # Only use battery if we can cover peak usage too
                     if data.TimeOfDay.hour != 15 or newHour.Battery >= (data.Usage + priorDayPeakUsage):
                         # During Winter, partialPeak rate is less than offPeakRate/batteryEfficiency,
@@ -861,8 +1006,9 @@ class   HomeSolar(tkinter.Tk):
                 # Handle OffPeak periods
                 #
                 #newHour.ApplyNewSolarToGrid( )
-                newHour.ApplyOldSolarToGrid( )
-                newHour.ApplyNewSolarToGrid( )
+                if not option.Installed:
+                    newHour.ApplyOldSolarToGrid( )
+                    newHour.ApplyNewSolarToGrid( )
 
                 newHour.ApplyNewSolarToBattery( option )
                 if option.NewSolarProd == 0 or option.NEM == '3.0':
@@ -926,7 +1072,7 @@ class   HomeSolar(tkinter.Tk):
             return
 
         # Compute average hourly data for Summer, Winter, and diagMonth
-        diagMonth = 8
+        diagMonth = 12
         diagMonthDays = None
         priorDay = 0
         YearlyTotals            = HourlyProj(battery=option.MaxBattery)
@@ -995,7 +1141,7 @@ class   HomeSolar(tkinter.Tk):
         # vueData also includes an extra entry for midnight on the day after the last export day
         # i.e.  Exporting 1/1/24 to 12/31/24 includes an entry for 1/1/25 00:00
         usage = 0
-        extraHour  = datetime.datetime(year=2000,month=1,day=1)
+        extraHour  = datetime(year=2000,month=1,day=1)
         if len(vueData) > 0:
             extraHour = max(vueData.keys())
         for hourTime, solarProd in vueData.items():
@@ -1003,7 +1149,8 @@ class   HomeSolar(tkinter.Tk):
                 usage = pgeData[hourTime]
             # solarProd is negative and needs to be combined
             # with PGE usage to reflect actual usage w/o solar
-            usage = max( 0, usage - solarProd )
+            solarProd = abs(solarProd)
+            usage = max( 0, usage + solarProd )
             if hourTime < extraHour:
                 # TODO: Do we need to suppress the last vueData entry?
                 self.hourlyData.append( HourlyData( usage, solarProd, hourTime ) )
@@ -1015,6 +1162,8 @@ class   HomeSolar(tkinter.Tk):
 def readPgeData( pgeDataFile, verbose=False ):
     pgeData = {}
     try:
+        if verbose:
+            print( "readPgeData: Reading %s" % pgeDataFile )
         in_file = open( pgeDataFile, 'r' )
         blankLine = in_file.readline()
         nameLine = in_file.readline()
@@ -1049,7 +1198,7 @@ def readPgeData( pgeDataFile, verbose=False ):
     csv_reader = csv.DictReader(in_file)
 
     numRows = 0
-    rowTime = datetime.datetime.now()
+    rowTime = datetime.now()
     for row in csv_reader:
         numRows = numRows+1
         rowDate = dateutil.parser.parse( row['DATE'] )
@@ -1061,9 +1210,9 @@ def readPgeData( pgeDataFile, verbose=False ):
             usage = float( row['IMPORT (kWh)'])
             usage -= float( row['EXPORT (kWh)'])
 
-        rowTime = rowDate + datetime.timedelta(hours=rowStart.hour, minutes=rowStart.minute)
+        rowTime = rowDate + timedelta(hours=rowStart.hour, minutes=rowStart.minute)
         if rowTime in pgeData:
-            rowTime = rowTime + datetime.timedelta(minutes=1)
+            rowTime = rowTime + timedelta(minutes=1)
         pgeData[rowTime] = usage
         if verbose and len(pgeData) <= 1:
             print( "%s: %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), usage ) )
@@ -1073,7 +1222,9 @@ def readPgeData( pgeDataFile, verbose=False ):
     return pgeData
 
 def readVueData( vueDataFile, verbose=False ):
-    vueData = {}
+    newVueData = {}
+    if verbose:
+        print( "readVueData: Reading %s" % ( vueDataFile ) )
     try:
         in_file = open( vueDataFile, 'r' )
 
@@ -1092,30 +1243,107 @@ def readVueData( vueDataFile, verbose=False ):
 
     csv_reader = csv.DictReader(in_file)
     numRows = 0
-    rowTime = datetime.datetime.now()
+    solarOutput = 0
+    rowTime = datetime.now()
     for row in csv_reader:
         numRows = numRows+1
         rowTime = dateutil.parser.parse( row[vueDateLabel] )
         if vueSolarLabel in csv_reader.fieldnames:
-            solarOutput = float( row[vueSolarLabel])
-        if rowTime in vueData:
-            rowTime = rowTime + datetime.timedelta(minutes=1)
-        vueData[rowTime] = solarOutput
-        if verbose and len(vueData) <= 1:
+            solarOutput = abs( float( row[vueSolarLabel]) )
+        if rowTime in newVueData:
+            rowTime = rowTime + timedelta(minutes=1)
+        newVueData[rowTime] = solarOutput
+        if verbose and len(newVueData) <= 1:
             print( "%s: %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), solarOutput ) )
     if verbose:
         print( "%s: %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), solarOutput ) )
-    return vueData
+    return newVueData
+
+def readEnphaseData( enphaseDataFile, verbose=False ):
+    newEnphaseData = {}
+    if verbose:
+        print( "readEnphaseData: Reading %s" % ( enphaseDataFile ) )
+    try:
+        in_file = open( enphaseDataFile, 'r' )
+
+    except IOError as v:
+        try:
+            (code, message) = v
+        except:
+            code = 0
+            message = v
+        print(repr(sys.exception()))
+        sys.stderr.write('I/O Error %s: Could not open "%s"\n' % (enphaseDataFile, str(message)))
+        raise
+    except:
+        print(repr(sys.exception()))
+        raise
+
+    csv_reader = csv.DictReader(in_file)
+    numRows = 0
+    rowTime  = datetime.now()
+    priorRowTime  = rowTime
+    durMinutes = 15
+    enphaseProduced = 0
+    enphaseCharged = 0
+    enphaseDisCharged = 0
+    enphaseConsumed = 0
+    enphaseExport = 0
+    enphaseGenerator = 0
+    enphaseImport = 0
+    for row in csv_reader:
+        rowTime = dateutil.parser.parse( row[enphaseDateLabel] )
+        if rowTime.tzinfo is None:
+            rowTime = rowTime.replace(tzinfo=local_tz)
+        if numRows == 1:
+            durMinutes = int((rowTime - priorRowTime).total_seconds()/60)
+        if enphaseSolarLabel in csv_reader.fieldnames:
+            enphaseProduced = float(row[enphaseSolarLabel])/1000
+        if enphaseChargedLabel in csv_reader.fieldnames:
+            enphaseCharged = float(row[enphaseChargedLabel])/1000
+        if enphaseConsumedLabel in csv_reader.fieldnames:
+            enphaseConsumed = float(row[enphaseConsumedLabel])/1000
+        if enphaseDischargedLabel in csv_reader.fieldnames:
+            enphaseDischarged = float(row[enphaseDischargedLabel])/1000
+        if enphaseExportLabel in csv_reader.fieldnames:
+            enphaseExport = float(row[enphaseExportLabel])/1000
+        if enphaseGeneratorLabel in csv_reader.fieldnames:
+            enphaseGenerator = float(row[enphaseGeneratorLabel])/1000
+        if enphaseImportLabel in csv_reader.fieldnames:
+            enphaseImport = float(row[enphaseImportLabel])/1000
+
+        # TODO: Handle dups
+        #if rowTime in newEnphaseData:
+        #    rowTime = rowTime + timedelta(minutes=1)
+        newData = EnergyData(time=rowTime, durMinutes=durMinutes,
+                    enphaseCharged=enphaseCharged,
+                    enphaseConsumed=enphaseConsumed,
+                    enphaseDisCharged=enphaseDisCharged,
+                    enphaseExport=enphaseExport,
+                    enphaseGenerator=enphaseGenerator,
+                    enphaseImport=enphaseImport,
+                    enphaseProduced=enphaseProduced)
+        newEnphaseData[rowTime] = newData
+        priorRowTime = rowTime
+        if verbose and len(newEnphaseData) <= 1:
+            print( "%s: Consumed %.2f, Produced %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), enphaseConsumed, enphaseProduced ) )
+        numRows = numRows+1
+
+    if verbose:
+        print( "%s: Consumed %.2f, Produced %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), enphaseConsumed, enphaseProduced ) )
+    return newEnphaseData
 
 def process_options(argv):
     if argv is None:
        argv = sys.argv[1:]
-    desc = 'cmpSolarBatteryOptions reads PGE data files and analyses them.'
+    desc = 'dataViewer reads PGE, Enphase, and Emporia Vue data files and creates screens to view data for various solar and battery options.'
     parser = argparse.ArgumentParser( description = desc )
-    parser.add_argument( '-f', '--pgeDataFiles', dest='pgeDataFiles', action='append', \
+    parser.add_argument( '-f', '--pgeDataFiles', dest='pgeDataFiles', nargs="*", \
             help='Read PGE Data File -f pgeDataFile1.csv [-f pgeDataFile2.csv]' )
-    parser.add_argument( '-e', '--vueDataFiles', dest='vueDataFiles', action='append', \
+    parser.add_argument( '-V', '--vueDataFiles', dest='vueDataFiles', nargs="*", \
             help='Read Emporia Vue data file.' )
+    parser.add_argument( '-e', '--enphaseDataFiles', dest='enphaseDataFiles', nargs="*", \
+            help='Read Enphase data file.' )
     parser.add_argument( '-v', '--verbose', action='store_true', help='show verbose diags' )
     options = parser.parse_args()
     return options
@@ -1133,10 +1361,23 @@ def main(argv=None):
                 print( 'Read  "%u" PGE Data Points' % len(newData) )
             pgeData.update(newData)
 
-    if options.verbose:
+    if options.verbose and len(pgeData) > 0:
         print( 'Total "%u" PGE Data Points' % len(pgeData) )
         print( 'From %s to %s' % ( min(pgeData.keys()).strftime('%m/%d/%Y, %H:%M'),
                                    max(pgeData.keys()).strftime('%m/%d/%Y, %H:%M') ) )
+
+    global enphaseData
+    if options.enphaseDataFiles:
+        for enphaseDataFile in options.enphaseDataFiles:
+            newData = readEnphaseData( enphaseDataFile, verbose=options.verbose )
+            if options.verbose:
+                print( 'Read  "%u" Enphase Data Points' % len(newData) )
+            enphaseData.update(newData)
+
+    if options.verbose and len(enphaseData) > 0:
+        print( 'Total "%u" Enphase Data Points' % len(enphaseData) )
+        print( 'From %s to %s' % ( min(enphaseData.keys()).strftime('%m/%d/%Y, %H:%M'),
+                                   max(enphaseData.keys()).strftime('%m/%d/%Y, %H:%M') ) )
 
     global vueData
     if options.vueDataFiles:
@@ -1156,7 +1397,7 @@ def main(argv=None):
     myHomeSolar.ProcessDataFiles( pgeData, vueData, options.verbose )
 
     print("Current PGE Rate Plan Costs")
-    myHomeSolar.AddOption( Option( myHomeSolar, 'None', 'E-TOU-D', '1.0', 0, 0, 0, 0 ), verbose=options.verbose )
+#   myHomeSolar.AddOption( Option( myHomeSolar, 'None', 'E-TOU-D', '1.0', 0, 0, 0, 0 ), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'None', 'E-TOU-C', '1.0', 0, 0, 0, 0 ), verbose=options.verbose )
     print("\nNEM 1.0 options")
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Tesla', 'E-ELEC', '1.0', 13.5, 0, 14000 ), verbose=options.verbose )
@@ -1178,8 +1419,8 @@ def main(argv=None):
 
     # Enphase Inverters w/ 3 Enphase 5P Batteries
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14247, 54900*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
-    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 12871+672*-0, (49500+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14215+672*-0, (52000+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 12871+672*-0, (49500+1250*-0)*0.70, useGridCharging=0, efficiency=90, installed=True), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14215+672*-0, (52000+1250*-0)*0.70, useGridCharging=0, efficiency=90, installed=True), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 12871+687*2, (49500+1400*2)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
     # Best NEM 1.0 payback: 7.21yrs 23 panels, 12859 kWh, YearlyPGE=$482, $36470 cost after rebate
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '1.0', 5.0*3, 3.2*3, 14247+694*-0, (54900+1400*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
@@ -1190,7 +1431,7 @@ def main(argv=None):
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14247+694*-7, (54900+1400*-7)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14247+694*-2, (54900+1400*-2)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 12871+672*-0, (49500+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
-    myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14215+672*-0, (52000+1250*-0)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
+    myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14215+672*-0, (52000+1250*-0)*0.70, useGridCharging=0, efficiency=90, installed=True), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Enphase-3x5P', 'E-ELEC', '3.0', 5.0*3, 3.2*3, 14247+694*-6, (54900+1400*-6)*0.70, useGridCharging=0, efficiency=90), verbose=options.verbose )
 
     # Enphase Inverters w/ 2 Enphase 5P Batteries
@@ -1231,7 +1472,7 @@ def main(argv=None):
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 15.0, 8, 14032-694*4, (51000-1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 15.0, 8, 14032-694*3, (51000-1400*3)*0.70, useGridCharging=1), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 15.0, 8, 14032-694*2, (51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
-    # SystemCost=$40810, NewSolar=11256kWh, Battery=30kWh, YrlyPgeCost=$1256, PaybkYrs=9.06
+    # SystemCost=$40810, NewSolar=11256kWh, Battery=30kWh, YrlyCost=$1256, PaybkYrs=9.06
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032-694*4, (12900+51000-1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032-694*3, (12900+51000-1400*3)*0.70, useGridCharging=1), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032-694*2, (12900+51000-1400*2)*0.70, useGridCharging=1), verbose=options.verbose )
@@ -1240,9 +1481,9 @@ def main(argv=None):
     # NEM 3.0 payback: 9.01yrs 21 panels, 14032kWh, 2 aPower2 batteries, YearlyPGE=$1251, $44730 cost after rebate
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032-694*0, (12900+51000-1400*0)*0.70, useGridCharging=1), verbose=options.verbose )
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032+694*4, (12900+51000+1400*4)*0.70, useGridCharging=1), verbose=options.verbose )
-    # SystemCost=$54530, YrlyPgeCost=$605, PaybkYrs=9.42, NewSolar=20972kWh, Battery=30kWh
+    # SystemCost=$54530, YrlyCost=$605, PaybkYrs=9.42, NewSolar=20972kWh, Battery=30kWh
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 30.0,16, 14032+694*10, (12900+51000+1400*10)*0.70, useGridCharging=1), verbose=options.verbose )
-    # SystemCost=$63560, YrlyPgeCost=$429, PaybkYrs=10.25, NewSolar=20972kWh, Battery=45kWh
+    # SystemCost=$63560, YrlyCost=$429, PaybkYrs=10.25, NewSolar=20972kWh, Battery=45kWh
     #myHomeSolar.AddOption( Option( myHomeSolar, 'Franklin', 'E-ELEC', '3.0', 45.0,24, 14032+694*10, (12900*2+51000+1400*10)*0.70, useGridCharging=1), verbose=options.verbose )
 
     # Get handle for Tkinter root window and hide it
