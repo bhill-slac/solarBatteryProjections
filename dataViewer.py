@@ -45,9 +45,6 @@ enphaseImportLabel     = 'Imported from Grid (Wh)'
 enphaseSolarLabel      = 'Energy Produced (Wh)'
 
 vueDateLabel  = 'Time Bucket (America/Los_Angeles)'
-vueMainsBLabel = 'Main panel-Mains_B (kWhs)'
-vueMainsCLabel = 'Main panel-Mains_C (kWhs)'
-vueTanklessLabel = 'Main panel-Water Heater-Tankless water heater (kWhs)'
 vueSolarLabel = 'Main panel-Solar/Generation-Solar inverter (kWhs)'
 pgeData = []
 vueData = []
@@ -297,12 +294,6 @@ class EnergyData:
             output += f", PgeImport={self.PgeImport:>6.2f}"
         if self.PgeExport is not None:
             output += f", PgeExport={self.PgeExport:>6.2f}"
-        if self.Generator is not None:
-            output += f", Generator={self.Generator:>6.2f}"
-        if self.EnphaseImport is not None:
-            output += f", EnphaseImport={self.EnphaseImport:>6.2f}"
-        if self.EnphaseExport is not None:
-            output += f", EnphaseExport={self.EnphaseExport:>6.2f}"
         if self.Charged is not None:
             output += f", Charged={self.Charged:>6.2f}"
         if self.DisCharged is not None:
@@ -664,13 +655,13 @@ class Option( tkinter.Toplevel ):
         plotTitle = f"{self.MaxBattery}kWh {self.Vendor} Battery, NewSolarProd={self.NewSolarProd}, RatePlan={self.RatePlan}, NEM={self.NEM}, UseGridCharging={self.UseGridCharging}"
         self.title(plotTitle)
         self.YearlyDataFrame = tkinter.Frame(self, height=40)
-        self.DailyGraphFrame = tkinter.Frame(self, height=240)
+        self.DailyGraphFrame = tkinter.Frame(self, height=120)
         self.DailyDataFrame = tkinter.Frame(self, height=40)
         #self.fig = plt.figure( plotTitle, figsize=(12,4) )
         #self.axs = self.fig.subplots( 1, 1 )
         #self.day_ax = self.axs[0]
         #self.day_ax = self.axs
-        self.fig = plt.figure( plotTitle, figsize=(16,4) )
+        self.fig = plt.figure( plotTitle, figsize=(12,4) )
         self.day_ax = self.fig.add_subplot()
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.DailyGraphFrame)
         #self.toolbar = NavigationToolbar2Tk(self.canvas, self.DailyGraphFrame, pack_toolbar=False)
@@ -750,58 +741,35 @@ class Option( tkinter.Toplevel ):
             Grid.append( grid )
             Time.append( energyData.TimeOfDay )
             newSolar = float(energyData.NewSolar or 0.0)
-
-            OldSolarCalibration = 1.02
-            if energyData.OldSolar is not None:
-                oldSolar = energyData.OldSolar * OldSolarCalibration
-            elif energyData.Consumed is not None and energyData.DisCharged is not None and energyData.PgeExport is not None:
-                oldSolar = energyData.Consumed + energyData.Charged + energyData.PgeExport - newSolar - grid - energyData.DisCharged
-                oldSolar = max(0.0, oldSolar)
-            else:
-                oldSolar = 0.0
-
-            if energyData.Consumed is not None:
-                consumed = energyData.Consumed
-            elif energyData.OldSolar and energyData.VueImport and energyData.VueExport:
-                consumed = energyData.OldSolar + energyData.VueImport - energyData.VueExport
-            else:
-                consumed = grid + float(energyData.OldSolar or 0.0)
-            Consumed.append( consumed )
-
+            oldSolar = float(energyData.OldSolar or 0.0)
             solar = newSolar + oldSolar
             Solar.append( solar )
             OldSolar.append( oldSolar )
 
             export = energyData.PgeExport
             if export is None:
-                if oldSolar and energyData.EnphaseExport and grid:
-                    export = oldSolar + energyData.EnphaseExport - grid
-                    export = max(0.0, export)
-                elif energyData.EnphaseExport:
-                    export = energyData.EnphaseExport
-                elif energyData.VueExport:
-                    export = energyData.VueExport
-                export = float(export or 0.0)
-            Export.append( export )
+                export = energyData.EnphaseExport
+            if export is None:
+                export = energyData.VueExport
+            Export.append( float(energyData.PgeExport or 0.0) )
 
+            consumed = energyData.Consumed
+            if consumed is None:
+                consumed = grid + newSolar + oldSolar
+            Consumed.append( consumed )
             charged      = float(energyData.Charged      or 0.0)
-            #charged      = charged / (self.Efficiency/100)
             disCharged   = float(energyData.DisCharged   or 0.0)
             gridCharging = energyData.GridCharging
             if gridCharging is None:
-                if (consumed + charged + export) > (grid + solar + disCharged):
-                    gridCharging = (consumed + charged + export) - (grid + solar + disCharged)
-                    gridCharging = max(grid, gridCharging)
-                #if (solar + grid) > consumed:
-                #    gridCharging = min(solar + grid - consumed, charged)
+                if solar < charged:
+                    gridCharging = charged - solar
             if gridCharging is None:
                 gridCharging = 0.0
             if energyData.Battery is None:
-                battery += charged * (self.Efficiency/100)
+                battery += charged / (self.Efficiency/100)
                 battery -= disCharged
             else:
                 battery = energyData.Battery
-            battery = min(battery, self.MaxBattery)
             DisCharged.append( disCharged )
             Charged.append( charged )
             Battery.append( battery )
@@ -809,7 +777,7 @@ class Option( tkinter.Toplevel ):
             GridCharging.append( gridCharging )
             excess =  float(energyData.NewExcess or 0.0)
             excess += float(energyData.OldExcess or 0.0)
-            excess = max( excess, 0, solar - consumed - charged - export )
+            excess = max( excess, 0, solar - consumed - charged )
             Excess.append( excess )
             Cost.append( float(energyData.Cost or 0.0) )
         data = {    'TimeOfDay':    np.array(Time),
@@ -883,41 +851,20 @@ class Option( tkinter.Toplevel ):
             data = self.GetProjectionsForDay( month, day )
         else:
             data = self.GetDataForDay( month, day )
-
+        if True:
+            print( f"{month}/{day} data:" )
+            for k in data.keys():
+                print( f"\n{k}[{len(data[k])}]: " )
+                pprint.pprint( f"{data[k]}" )
         if 'solar' not in data or len(data) == 0 or len(data['solar']) == 0:
             self.day_ax.set_title(f"No energy data for {month}/{day}",
                             fontsize=16, fontweight='bold' )
             return
-
-        if True:    # Diag printout
-            srcs  = data['solar'] + data['grid'] + data['disCharged']
-            loads = data['consumed'] + data['charged'] + data['export'] + data['excess']
-            for i in range(len(data['solar'])):
-                output =  f"{data['TimeOfDay'][i]}: "
-                output += f"Grid={data['grid'][i]:4.2f}, "
-                output += f"Consumed={data['consumed'][i]:4.2f}, "
-                output += f"Solar={data['solar'][i]:4.2f}, "
-                output += f"OldSolar={data['oldSolar'][i]:4.2f}, "
-                output += f"Export={data['export'][i]:4.2f}, "
-                output += f"BattCh={data['battery'][i]:4.2f}, "
-                output += f"DisCharg={data['disCharged'][i]:4.2f}, "
-                output += f"Charged={data['charged'][i]:4.2f}, "
-                output += f"GridCharg={data['gridCharging'][i]:4.2f}, "
-                output += f"Excess={data['excess'][i]:4.2f}, "
-                output += f"Cost=${data['cost'][i]:5.2f}, "
-                output += f"Srcs={srcs[i]:5.2f}, "
-                output += f"Loads={loads[i]:5.2f}"
-                print( output )
-
         if newSolarExportable:
             gridBottom = data['solar'] + data['disCharged']
         else:
             gridBottom = data['oldSolar'] + data['disCharged']
-        max_kwh = max(max(data['solar']),max(data['consumed']),max(data['grid'] + data['solar'] + data['disCharged']))
-        kwh_yticks = np.arange(int(max_kwh+0.99999)+1)
-        if True:
-            print(f"set_yticks: {kwh_yticks}")
-        self.day_ax.set_yticks( kwh_yticks )
+        self.day_ax.set_yticks( np.arange(int(max(max(data['solar']),max(data['consumed']),max(data['grid'] + data['solar'] + data['disCharged']))+0.99999)+1) )
         #print( "max solar=", max(data['solar']) )
         #print( "int max solar=", int(max(data['solar'])+0.9) )
         #print( "yticks range=", np.arange(int(max(data['solar'])+0.9)) )
@@ -925,43 +872,22 @@ class Option( tkinter.Toplevel ):
                             fontsize=16, fontweight='bold' )
         self.day_ax.plot( 'TimeOfDay', 'consumed', data=data, color='xkcd:pale orange' )
         self.day_ax.plot( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', label='Solar Prod' )
-        gridBottom = data['solar'] + data['disCharged'] - data['export'] - data['charged']
-        if min(gridBottom) < 0:
-            print( f"gridBottom={gridBottom}" )
-            gridBottom = np.maximum(gridBottom,0)
-        self.day_ax.bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=40), align='center', label='Grid', bottom=gridBottom )
-        self.day_ax.bar( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', width=timedelta(minutes=36), align='center', label='Solar' )
+        gridBottom = data['solar'] + data['disCharged']
+        self.day_ax.bar( 'TimeOfDay', 'grid', data=data, color='xkcd:orange', width=timedelta(minutes=34), align='center', label='Grid', bottom=gridBottom )
+        self.day_ax.bar( 'TimeOfDay', 'solar', data=data, color='xkcd:bright yellow', width=timedelta(minutes=34), align='center', label='Solar' )
         #batteryBottom = data['consumed'] - data['disCharged']
-        batteryBottom = data['solar'] - data['excess'] - data['export']
-        if min(batteryBottom) < 0:
-            print( f"batteryBottom={batteryBottom}" )
-            batteryBottom = np.maximum(batteryBottom,0)
-            print( f"batteryBottom={batteryBottom}" )
-        self.day_ax.bar( 'TimeOfDay', 'disCharged', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=32), align='center', label='Battery', bottom=batteryBottom)
+        batteryBottom = data['solar'] - data['excess'] - data['export'] - data['charged']
+        self.day_ax.bar( 'TimeOfDay', 'disCharged', data=data, color='xkcd:cobalt blue', width=timedelta(minutes=34), align='center', label='Battery', bottom=batteryBottom)
         #chargingBottom = data['solar'] - data['disCharged']
         chargingBottom = data['consumed'] - data['disCharged']
-        chargingBottom = data['solar'] + data['disCharged'] + data['grid'] - data['charged'] - data['export']
-        chargingBottom = data['solar'] + data['disCharged']                - data['charged'] - data['export']
-        if min(chargingBottom) < 0:
-            print( f"chargingBottom={chargingBottom}" )
-            chargingBottom = np.maximum(chargingBottom,0)
         self.day_ax.bar( 'TimeOfDay', 'charged', data=data, color='xkcd:sky blue', width=timedelta(minutes=28), align='center', label='Charging', bottom=chargingBottom )
         #gridChargingBottom = data['charged'] - data['gridCharging']
         #gridChargingBottom = data['consumed'] + data['charged'] - (data['gridCharging']/self.Efficiency)
         gridChargingBottom = data['consumed'] + data['charged'] - data['gridCharging']
-        if min(gridChargingBottom) < 0:
-            print( f"gridChargingBottom={gridChargingBottom}" )
-            gridChargingBottom = np.maximum(gridChargingBottom,0)
-        self.day_ax.bar( 'TimeOfDay', 'gridCharging', data=data, color='xkcd:electric blue', width=timedelta(minutes=24), align='center', label='GridCharging', bottom=gridChargingBottom )
+        self.day_ax.bar( 'TimeOfDay', 'gridCharging', data=data, color='xkcd:electric blue', width=timedelta(minutes=14), align='center', label='GridCharging', bottom=gridChargingBottom )
         exportBottom = data['solar'] - data['excess'] - data['export']
-        if min(exportBottom) < 0:
-            print( f"exportBottom={exportBottom}" )
-            exportBottom = np.maximum(exportBottom,0)
-            print( f"exportBottom={exportBottom}" )
-        self.day_ax.bar( 'TimeOfDay', 'export', data=data, color='xkcd:fire engine red', width=timedelta(minutes=20), align='center', label='Export', bottom=exportBottom)
+        self.day_ax.bar( 'TimeOfDay', 'export', data=data, color='xkcd:fire engine red', width=timedelta(minutes=14), align='center', label='Export', bottom=exportBottom)
         excessBottom = data['solar'] - data['excess']
-        if min(excessBottom) < 0:
-            print( f"excessBottom={excessBottom}" )
         self.day_ax.bar( 'TimeOfDay', 'excess', data=data, color='xkcd:neon purple', width=timedelta(minutes=14), align='center', label='Excess', bottom=excessBottom)
 
         self.day_ax.legend(loc='upper left')
@@ -1063,9 +989,7 @@ class HomeSolar(tkinter.Tk):
         battery = option.MaxBattery / 2
         earliestDateTime = getLatestDateTime( self.energyData )
         latestDateTime = getLatestDateTime( self.energyData )
-        sortedData = list(self.energyData.values())
-        sortedData.sort(key=lambda data: data.TimeOfDay)
-        option.EnergyDataList = sortedData
+        option.EnergyDataList = self.energyData.values()
         option.Projections.append( HourlyProj( time=earliestDateTime, battery=battery ) )
         diagTotals = HourlyProj()
         diagDay  = HourlyProj()
@@ -1373,11 +1297,6 @@ class HomeSolar(tkinter.Tk):
                 if verbose:
                     print( f"New EnphaseData %s" % self.energyData[d.TimeOfDay] )
 
-        # Adjust timestamps to middle of interval
-        # i.e. For hour data, set minutes=30
-        for d in self.energyData:
-            d.TimeOfDay = d.TimeOfDay + timedelta(minutes=d.DurMinutes/2)
-
         if verbose:
             earliestDateTime = getEarliestDateTime( self.energyData )
             latestDateTime = getLatestDateTime( self.energyData )
@@ -1474,42 +1393,31 @@ def readVueData( vueDataFile, verbose=False ):
         print(repr(sys.exception()))
         raise
 
-    csv_reader = csv.DictReader(in_file)
+    # This is when I reversed the VUE main CT's to fix polarity of readings for mains
+    vueCTUpdateTime = datetime( year=2026, month=2, day=13, hour=13 )
     numRows = 0
-    rowStartTime = datetime.now()
+    solarOutput = 0
+    rowTime = datetime.now()
     durMinutes = 60
     for row in csv_reader:
-        solarOutput = 0
-        mainsB = 0
-        mainsC = 0
-        # Vue timestamp is the beginning of the interval
-        rowStartTime = dateutil.parser.parse( row[vueDateLabel] )
-        if rowStartTime.tzinfo is None:
-            rowStartTime = rowStartTime.replace(tzinfo=local_tz)
+        rowTime = dateutil.parser.parse( row[vueDateLabel] )
+        if rowTime.tzinfo is None:
+            rowTime = rowTime.replace(tzinfo=local_tz)
         if numRows == 1:
-            durMinutes = int((rowStartTime - newVueData[0].TimeOfDay).total_seconds()/60)
+            durMinutes = int((rowTime - newVueData[0].TimeOfDay).total_seconds()/60)
             newVueData[0].DurMinutes = durMinutes
         if vueSolarLabel in csv_reader.fieldnames:
             solarOutput = abs( float( row[vueSolarLabel]) )
-        if vueMainsBLabel in csv_reader.fieldnames:
-            mainsB = float( row[vueMainsBLabel] )
-        if vueMainsCLabel in csv_reader.fieldnames:
-            mainsC = float( row[vueMainsCLabel] )
-        vueImport = ((mainsB if mainsB < 0 else 0) + (mainsC if mainsC < 0 else 0)) / -2
-        vueExport = ((mainsB if mainsB > 0 else 0) + (mainsC if mainsC > 0 else 0)) / -2
-
-        # Handle dups
-        newData = EnergyData(time=rowStartTime, durMinutes=durMinutes, vueImport=vueImport, vueExport=vueExport, vueSolar=solarOutput )
-        if len(newVueData) > 1 and newData.VueImport == newVueData[-1].VueImport and newData.VueExport == newVueData[-1].VueExport:
-            continue
-
-        newVueData.append( newData )
+        # TODO: Handle dups
+        #if rowTime in newVueData:
+        #   rowTime = rowTime + timedelta(minutes=1)
+        newVueData.append( EnergyData(time=rowTime, durMinutes=durMinutes, vueSolar=solarOutput ) )
         if verbose and len(newVueData) <= 1:
-            print( "%s: %.2f" % ( rowStartTime.strftime('%m/%d/%Y, %H:%M'), solarOutput ) )
+            print( "%s: %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), solarOutput ) )
         numRows = numRows+1
 
     if verbose:
-        print( "%s: %.2f" % ( rowStartTime.strftime('%m/%d/%Y, %H:%M'), solarOutput ) )
+        print( "%s: %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), solarOutput ) )
     return newVueData
 
 def readEnphaseData( enphaseDataFile, verbose=False ):
@@ -1534,8 +1442,8 @@ def readEnphaseData( enphaseDataFile, verbose=False ):
 
     csv_reader = csv.DictReader(in_file)
     numRows = 0
-    rowEndTime  = datetime.now()
-    priorRowEndTime  = rowEndTime
+    rowTime  = datetime.now()
+    priorRowTime  = rowTime
     durMinutes = 15
     enphaseProduced = 0
     enphaseCharged = 0
@@ -1545,13 +1453,11 @@ def readEnphaseData( enphaseDataFile, verbose=False ):
     enphaseGenerator = 0
     enphaseImport = 0
     for row in csv_reader:
-        # Enphase timestamp is the end of the interval
-        rowEndTime = dateutil.parser.parse( row[enphaseDateLabel] )
-        if rowEndTime.tzinfo is None:
-            rowEndTime = rowEndTime.replace(tzinfo=local_tz)
+        rowTime = dateutil.parser.parse( row[enphaseDateLabel] )
+        if rowTime.tzinfo is None:
+            rowTime = rowTime.replace(tzinfo=local_tz)
         if numRows == 1:
-            durMinutes = int((rowEndTime - priorRowEndTime).total_seconds()/60)
-        rowStartTime = rowEndTime - timedelta(minutes=durMinutes)
+            durMinutes = int((rowTime - priorRowTime).total_seconds()/60)
         if enphaseSolarLabel in csv_reader.fieldnames:
             enphaseProduced = float(row[enphaseSolarLabel])/1000
         if enphaseChargedLabel in csv_reader.fieldnames:
@@ -1559,7 +1465,7 @@ def readEnphaseData( enphaseDataFile, verbose=False ):
         if enphaseConsumedLabel in csv_reader.fieldnames:
             enphaseConsumed = float(row[enphaseConsumedLabel])/1000
         if enphaseDischargedLabel in csv_reader.fieldnames:
-            enphaseDisCharged = float(row[enphaseDischargedLabel])/1000
+            enphaseDischarged = float(row[enphaseDischargedLabel])/1000
         if enphaseExportLabel in csv_reader.fieldnames:
             enphaseExport = float(row[enphaseExportLabel])/1000
         if enphaseGeneratorLabel in csv_reader.fieldnames:
@@ -1568,9 +1474,9 @@ def readEnphaseData( enphaseDataFile, verbose=False ):
             enphaseImport = float(row[enphaseImportLabel])/1000
 
         # TODO: Handle dups
-        #if rowEndTime in newEnphaseData:
-        #    rowEndTime = rowEndTime + timedelta(minutes=1)
-        newData = EnergyData(time=rowStartTime, durMinutes=durMinutes,
+        #if rowTime in newEnphaseData:
+        #    rowTime = rowTime + timedelta(minutes=1)
+        newData = EnergyData(time=rowTime, durMinutes=durMinutes,
                     enphaseCharged=enphaseCharged,
                     enphaseConsumed=enphaseConsumed,
                     enphaseDisCharged=enphaseDisCharged,
@@ -1579,13 +1485,13 @@ def readEnphaseData( enphaseDataFile, verbose=False ):
                     enphaseImport=enphaseImport,
                     enphaseProduced=enphaseProduced)
         newEnphaseData.append( newData )
-        priorRowEndTime = rowEndTime
+        priorRowTime = rowTime
         if verbose and len(newEnphaseData) <= 1:
-            print( "%s: Consumed %.2f, Produced %.2f" % ( rowEndTime.strftime('%m/%d/%Y, %H:%M'), enphaseConsumed, enphaseProduced ) )
+            print( "%s: Consumed %.2f, Produced %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), enphaseConsumed, enphaseProduced ) )
         numRows = numRows+1
 
     if verbose:
-        print( "%s: Consumed %.2f, Produced %.2f" % ( rowEndTime.strftime('%m/%d/%Y, %H:%M'), enphaseConsumed, enphaseProduced ) )
+        print( "%s: Consumed %.2f, Produced %.2f" % ( rowTime.strftime('%m/%d/%Y, %H:%M'), enphaseConsumed, enphaseProduced ) )
     return newEnphaseData
 
 def process_options(argv):
